@@ -39,10 +39,10 @@
 #define SCENEITEM_PROPERTY_SCALEX 5
 #define SCENEITEM_PROPERTY_SCALEY 6
 #define SCENEITEM_PROPERTY_ROT 7
-#define SCENEITEM_PROPERTY_CROP_LEFT 8
-#define SCENEITEM_PROPERTY_CROP_RIGHT 9
-#define SCENEITEM_PROPERTY_CROP_TOP 11
-#define SCENEITEM_PROPERTY_CROP_BOTTOM 10
+#define SCENEITEM_PROPERTY_CROP_LEFT   8
+	#define SCENEITEM_PROPERTY_CROP_RIGHT  9
+	#define SCENEITEM_PROPERTY_CROP_BOTTOM 10
+	#define SCENEITEM_PROPERTY_CROP_TOP    11
 
 #define FEATURE_BOUNDINGBOX 0
 #define FEATURE_LANDMARK 1
@@ -51,24 +51,24 @@
 #define FEATURE_GAZE 4
 #define FEATURE_BODY 5
 
-#define FEATURE_BOUNDINGBOX_LEFT 0
-#define FEATURE_BOUNDINGBOX_HORIZONTAL_CENTER 1
-#define FEATURE_BOUNDINGBOX_RIGHT 2
-#define FEATURE_BOUNDINGBOX_WIDTH 3
-#define FEATURE_BOUNDINGBOX_TOP 4
-#define FEATURE_BOUNDINGBOX_VERTICAL_CENTER 5
-#define FEATURE_BOUNDINGBOX_BOTOM 6
-#define FEATURE_BOUNDINGBOX_HEIGHT 7
-#define FEATURE_BOUNDINGBOX_TOP_LEFT 8
-#define FEATURE_BOUNDINGBOX_TOP_CENTER 9
-#define FEATURE_BOUNDINGBOX_TOP_RIGHT 10
-#define FEATURE_BOUNDINGBOX_CENTER_RIGHT 11
-#define FEATURE_BOUNDINGBOX_BOTTOM_RIGHT 12
-#define FEATURE_BOUNDINGBOX_BOTTOM_CENTER 13
-#define FEATURE_BOUNDINGBOX_BOTTOM_LEFT 14
-#define FEATURE_BOUNDINGBOX_CENTER_LEFT 15
-#define FEATURE_BOUNDINGBOX_CENTER 16
-#define FEATURE_BOUNDINGBOX_SIZE 17
+#define FEATURE_BOUNDINGBOX_LEFT           0
+	#define FEATURE_BOUNDINGBOX_HORIZONTAL_CENTER    1
+	#define FEATURE_BOUNDINGBOX_RIGHT       2
+	#define FEATURE_BOUNDINGBOX_WIDTH           3
+	#define FEATURE_BOUNDINGBOX_TOP        4
+	#define FEATURE_BOUNDINGBOX_VERTICAL_CENTER  5
+	#define FEATURE_BOUNDINGBOX_BOW  6
+	#define FEATURE_BOUNDINGBOX_HEIGHT            7
+	#define FEATURE_BOUNDINGBOX_TOP_LEFT          8
+	#define FEATURE_BOUNDINGBOX_TOP_CENTER       9
+	#define FEATURE_BOUNDINGBOX_TOP_RIGHT        10
+	#define FEATURE_BOUNDINGBOX_CENTER_RIGHT      11
+	#define FEATURE_BOUNDINGBOX_BOTTOM_RIGHT     12
+	#define FEATURE_BOUNDINGBOX_BOTTOM_CENTER     13
+	#define FEATURE_BOUNDINGBOX_BOTTOM_LEFT       14
+	#define FEATURE_BOUNDINGBOX_CENTER_LEFT       15
+	#define FEATURE_BOUNDINGBOX_CENTER    16
+	#define FEATURE_BOUNDINGBOX_SIZE        17
 
 #define FEATURE_LANDMARK_X 0
 #define FEATURE_LANDMARK_Y 1
@@ -492,13 +492,13 @@ static bool nv_move_action_get_float(struct nvidia_move_info *filter, struct nvi
 			value = filter->keypoints3D.array[action->feature_number[0]].z;
 			success = true;
 		} else if (action->feature_property == BODY_ANGLE_X) {
-			filter->joint_angles.array[action->feature_number[0]].x;
+			value = filter->joint_angles.array[action->feature_number[0]].x;
 			success = true;
 		} else if (action->feature_property == BODY_ANGLE_Y) {
-			filter->joint_angles.array[action->feature_number[0]].y;
+			value = filter->joint_angles.array[action->feature_number[0]].y;
 			success = true;
 		} else if (action->feature_property == BODY_ANGLE_Z) {
-			filter->joint_angles.array[action->feature_number[0]].z;
+			value = filter->joint_angles.array[action->feature_number[0]].z;
 			success = true;
 		} else if (action->feature_number[1] >= (int32_t)filter->keypoints.num) {
 		} else if (action->feature_property == BODY_2D_DISTANCE) {
@@ -678,8 +678,9 @@ static void nv_move_update(void *data, obs_data_t *settings)
 		}
 		da_resize(filter->actions, actions);
 	} else if (actions > filter->actions.num) {
+		size_t old_num = filter->actions.num;
 		da_resize(filter->actions, actions);
-		for (size_t i = filter->actions.num; i < actions; i++) {
+		for (size_t i = old_num; i < actions; i++) {
 			struct nvidia_move_action *action = filter->actions.array + i;
 			memset(action, 0, sizeof(struct nvidia_move_action));
 		}
@@ -1850,7 +1851,8 @@ static void swap_action(obs_data_t *settings, long long a, long long b)
 			   "action_%lld_diff",
 			   "action_%lld_diff2",
 			   "action_%lld_threshold",
-			   "action_%lld_easing"};
+			   "action_%lld_easing",
+			   "action_%lld_canvas"};
 	struct dstr name1 = {0};
 	struct dstr name2 = {0};
 	for (long long i = 0; i < sizeof(actions) / sizeof(char *); i++) {
@@ -1943,14 +1945,14 @@ static void add_expressions_to_list(obs_property_t *p)
 	obs_property_list_add_int(p, "eyeBlink", -6);
 	obs_property_list_add_int(p, "eyeBlink_L", 11);
 	obs_property_list_add_int(p, "eyeBlink_R", 12);
-	obs_property_list_add_int(p, "eyeLookLeft", -17);
-	obs_property_list_add_int(p, "eyeLookRight", -20);
-	obs_property_list_add_int(p, "eyeLookSideways", -27);
-	obs_property_list_add_int(p, "eyeLookUpDown", -28);
-	obs_property_list_add_int(p, "eyeLookSideways_L", -29);
-	obs_property_list_add_int(p, "eyeLookSideways_R", -30);
-	obs_property_list_add_int(p, "eyeLookUpDown_L", -31);
-	obs_property_list_add_int(p, "eyeLookUpDown_R", -32);
+		obs_property_list_add_int(p, "eyeLookLeft", -18);
+			obs_property_list_add_int(p, "eyeLookRight", -21);
+			obs_property_list_add_int(p, "eyeLookSideways", -28);
+			obs_property_list_add_int(p, "eyeLookUpDown", -29);
+			obs_property_list_add_int(p, "eyeLookSideways_L", -30);
+			obs_property_list_add_int(p, "eyeLookSideways_R", -31);
+			obs_property_list_add_int(p, "eyeLookUpDown_L", -32);
+			obs_property_list_add_int(p, "eyeLookUpDown_R", -33);
 	obs_property_list_add_int(p, "eyeLookDown", -7);
 	obs_property_list_add_int(p, "eyeLookDown_L", 13);
 	obs_property_list_add_int(p, "eyeLookDown_R", 14);

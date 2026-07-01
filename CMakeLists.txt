@@ -37,6 +37,14 @@ PROPERTIES AUTOMOC ON
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/version.h)
 
+option(ENABLE_MEDIAPIPE_MOVE "Enable MediaPipe move filter" ON)
+if(ENABLE_MEDIAPIPE_MOVE)
+	target_sources(${PROJECT_NAME} PRIVATE
+		mediapipe-move-filter.cpp
+		mediapipe-load.h)
+	target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_MEDIAPIPE_MOVE)
+endif()
+
 if(OS_WINDOWS)
 	target_sources(${PROJECT_NAME} PRIVATE 
 		move-directshow-filter.cpp

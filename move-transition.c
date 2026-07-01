@@ -3336,12 +3336,8 @@ extern struct obs_source_info audio_move_filter;
 extern struct obs_source_info move_action_filter;
 extern struct obs_source_info move_audio_action_filter;
 extern struct obs_source_info move_wave_value_filter;
-#ifdef WIN32
-extern struct obs_source_info nvidia_move_filter;
-extern bool load_nvar(void);
-extern void unload_nvar(void);
-void SetMoveDirectShowFilter(struct obs_source_info *obs_source_info);
-#endif
+extern struct obs_source_info mediapipe_move_filter;
+extern void mp_move_register(void);
 
 extern DARRAY(struct udp_server) udp_servers;
 extern pthread_mutex_t udp_servers_mutex;
@@ -3478,6 +3474,10 @@ bool obs_module_load(void)
 	struct obs_source_info move_directshow_filter = {0};
 	SetMoveDirectShowFilter(&move_directshow_filter);
 	obs_register_source(&move_directshow_filter);
+#endif
+#ifdef ENABLE_MEDIAPIPE_MOVE
+	if (mediapipe_is_loaded())
+		mp_move_register();
 #endif
 	obs_register_source(&move_wave_value_filter);
 
