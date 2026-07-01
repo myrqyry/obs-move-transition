@@ -4,7 +4,9 @@
 #include <math.h>
 #include <obs-module.h>
 #include <obs-frontend-api.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -80,6 +82,7 @@ struct wave_value_info {
 	double random_amount;
 	double random_value;
 	double next_random_value;
+	double retry_timer;
 	double base_value;
 	double factor;
 	double threshold;
@@ -91,6 +94,7 @@ struct wave_value_info {
 	long long steps;
 	bool invert;
 	bool clamp_enabled;
+	uint64_t random_state;
 	int wave_type;
 };
 
@@ -151,9 +155,17 @@ static double wave_output(struct wave_value_info *wave)
 	return wave->amplitude * v;
 }
 
-static double random_wave_value(void)
+static double random_wave_value(struct wave_value_info *wave)
 {
-	return 2.0 * ((double)rand() / (double)RAND_MAX) - 1.0;
+	uint64_t x = wave->random_state;
+	if (!x)
+		x = 0x9e3779b97f4a7c15ULL;
+	x ^= x >> 12;
+	x ^= x << 25;
+	x ^= x >> 27;
+	wave->random_state = x;
+	const uint64_t value = x * 2685821657736338717ULL;
+	return 2.0 * ((double)(value >> 11) * (1.0 / 9007199254740992.0)) - 1.0;
 }
 
 static void wave_value_item_remove(void *data, calldata_t *call_data);
@@ -383,8 +395,10 @@ static void *wave_value_create(obs_data_t *settings, obs_source_t *source)
 	wave->amplitude = 1.0;
 	wave->pulse_width = 0.5;
 	wave->random_amount = 1.0;
-	wave->random_value = random_wave_value();
-	wave->next_random_value = random_wave_value();
+	wave->random_state = (uint64_t)(uintptr_t)wave ^ ((uint64_t)time(NULL) << 32) ^ 0x9e3779b97f4a7c15ULL;
+	wave->random_value = random_wave_value(wave);
+	wave->next_random_value = random_wave_value(wave);
+	wave->retry_timer = 1.0;
 	wave->clamp_min = -1000.0;
 	wave->clamp_max = 1000.0;
 	wave->steps = 4;
@@ -415,8 +429,7 @@ static void wave_value_video_render(void *data, gs_effect_t *effect)
 static double wave_value(struct wave_value_info *wave)
 {
 	const double value = wave_output(wave);
-	double val = value < wave->threshold ? wave->factor * wave->threshold + wave->base_value :
-					      wave->factor * value + wave->base_value;
+	double val = wave->factor * value + wave->base_value;
 	if (wave->clamp_enabled && wave->clamp_min < wave->clamp_max) {
 		if (val < wave->clamp_min)
 			val = wave->clamp_min;
@@ -424,6 +437,19 @@ static double wave_value(struct wave_value_info *wave)
 			val = wave->clamp_max;
 	}
 	return val;
+}
+
+static bool wave_value_retry_update(struct wave_value_info *wave, float seconds)
+{
+	wave->retry_timer += (double)seconds;
+	if (wave->retry_timer < 1.0)
+		return false;
+
+	wave->retry_timer = 0.0;
+	obs_data_t *settings = obs_source_get_settings(wave->move_filter.source);
+	wave_value_update(wave, settings);
+	obs_data_release(settings);
+	return true;
 }
 
 static void wave_value_tick(void *data, float seconds)
@@ -440,7 +466,7 @@ static void wave_value_tick(void *data, float seconds)
 		wave->phase += 1.0;
 	if (wave->phase < prev_phase) {
 		wave->random_value = wave->next_random_value;
-		wave->next_random_value = random_wave_value();
+		wave->next_random_value = random_wave_value(wave);
 	}
 
 	const double current_wave = wave_output(wave);
@@ -448,9 +474,8 @@ static void wave_value_tick(void *data, float seconds)
 
 	if (wave->action == VALUE_ACTION_TRANSFORM) {
 		if (!wave->sceneitem) {
-			obs_data_t *settings = obs_source_get_settings(wave->move_filter.source);
-			wave_value_update(wave, settings);
-			obs_data_release(settings);
+			if (!wave_value_retry_update(wave, seconds))
+				return;
 		}
 		if (!wave->sceneitem)
 			return;
@@ -526,9 +551,8 @@ static void wave_value_tick(void *data, float seconds)
 		}
 	} else if (wave->action == VALUE_ACTION_SOURCE_VISIBILITY) {
 		if (!wave->sceneitem) {
-			obs_data_t *settings = obs_source_get_settings(wave->move_filter.source);
-			wave_value_update(wave, settings);
-			obs_data_release(settings);
+			if (!wave_value_retry_update(wave, seconds))
+				return;
 		}
 		if (!wave->sceneitem)
 			return;
@@ -551,9 +575,8 @@ static void wave_value_tick(void *data, float seconds)
 		}
 	} else if (wave->action == VALUE_ACTION_FILTER_ENABLE) {
 		if (!wave->target_source) {
-			obs_data_t *settings = obs_source_get_settings(wave->move_filter.source);
-			wave_value_update(wave, settings);
-			obs_data_release(settings);
+			if (!wave_value_retry_update(wave, seconds))
+				return;
 		}
 		if (!wave->target_source)
 			return;
@@ -581,9 +604,8 @@ static void wave_value_tick(void *data, float seconds)
 		obs_source_release(source);
 	} else if (wave->action == VALUE_ACTION_SETTING && wave->setting_name && strlen(wave->setting_name)) {
 		if (!wave->target_source) {
-			obs_data_t *settings = obs_source_get_settings(wave->move_filter.source);
-			wave_value_update(wave, settings);
-			obs_data_release(settings);
+			if (!wave_value_retry_update(wave, seconds))
+				return;
 		}
 		if (!wave->target_source)
 			return;
@@ -877,7 +899,8 @@ static obs_properties_t *wave_value_properties(void *data)
 	p = obs_properties_add_list(ppts, "scene", obs_module_text("Scene"), OBS_COMBO_TYPE_EDITABLE, OBS_COMBO_FORMAT_STRING);
 	obs_property_set_modified_callback2(p, wave_value_scene_changed, data);
 
-	obs_properties_add_list(ppts, "sceneitem", obs_module_text("Source"), OBS_COMBO_TYPE_EDITABLE, OBS_COMBO_FORMAT_STRING);
+	obs_properties_add_list(ppts, "sceneitem", obs_module_text("SceneItem"), OBS_COMBO_TYPE_EDITABLE,
+				OBS_COMBO_FORMAT_STRING);
 
 	p = obs_properties_add_list(ppts, "source", obs_module_text("Source"), OBS_COMBO_TYPE_EDITABLE, OBS_COMBO_FORMAT_STRING);
 	obs_property_set_modified_callback2(p, wave_value_source_changed, data);
@@ -959,6 +982,8 @@ static obs_properties_t *wave_value_properties(void *data)
 
 static void wave_value_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_int(settings, "value_action", VALUE_ACTION_TRANSFORM);
+	obs_data_set_default_int(settings, "transform", TRANSFORM_POS_X);
 	obs_data_set_default_int(settings, S_WAVE_TYPE, WAVE_SINE);
 	obs_data_set_default_double(settings, S_WAVE_FREQUENCY, 1.0);
 	obs_data_set_default_double(settings, S_WAVE_AMPLITUDE, 1.0);

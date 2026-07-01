@@ -14,3 +14,6 @@
 
 # local agent planning artifacts
 /docs/superpowers/
+
+# cmake generated folders
+/cmake-obs/

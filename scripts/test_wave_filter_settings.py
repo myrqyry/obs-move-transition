@@ -86,6 +86,32 @@ def main():
             print(f"  - {token}")
         return 1
 
+    required_fix_tokens = [
+        "uint64_t random_state;",
+        "static double random_wave_value(struct wave_value_info *wave)",
+        "wave->retry_timer",
+        'obs_data_set_default_int(settings, "value_action", VALUE_ACTION_TRANSFORM)',
+        'obs_data_set_default_int(settings, "transform", TRANSFORM_POS_X)',
+        'obs_properties_add_list(ppts, "sceneitem", obs_module_text("SceneItem")',
+    ]
+    missing_fix_tokens = [token for token in required_fix_tokens if token not in source]
+    if missing_fix_tokens:
+        print("move-wave-value-filter.c is missing review-fix implementation details:")
+        for token in missing_fix_tokens:
+            print(f"  - {token}")
+        return 1
+
+    forbidden_fix_tokens = [
+        "value < wave->threshold ?",
+        "rand()",
+    ]
+    forbidden_fix_matches = [token for token in forbidden_fix_tokens if token in source]
+    if forbidden_fix_matches:
+        print("move-wave-value-filter.c still contains review-fix anti-patterns:")
+        for token in forbidden_fix_matches:
+            print(f"  - {token}")
+        return 1
+
     locale = EN_US_LOCALE.read_text()
     required_locale_tokens = [
         "WaveType.Cosine",
@@ -104,6 +130,8 @@ def main():
         "PulseWidth",
         "Steps",
         "RandomAmount",
+        'MoveWaveValueFilter="Wave Move"',
+        "SceneItem",
     ]
     missing_locale = [token for token in required_locale_tokens if token not in locale]
     if missing_locale:
