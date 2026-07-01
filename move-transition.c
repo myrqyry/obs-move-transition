@@ -3335,6 +3335,7 @@ extern struct obs_source_info move_audio_value_filter;
 extern struct obs_source_info audio_move_filter;
 extern struct obs_source_info move_action_filter;
 extern struct obs_source_info move_audio_action_filter;
+extern struct obs_source_info move_wave_value_filter;
 #ifdef WIN32
 extern struct obs_source_info nvidia_move_filter;
 extern bool load_nvar(void);
@@ -3478,6 +3479,7 @@ bool obs_module_load(void)
 	SetMoveDirectShowFilter(&move_directshow_filter);
 	obs_register_source(&move_directshow_filter);
 #endif
+	obs_register_source(&move_wave_value_filter);
 
 	proc_handler_t *ph = obs_get_proc_handler();
 	proc_handler_add(ph, "void move_get_transition_filter_function(in string filter_id, out ptr callback)",
