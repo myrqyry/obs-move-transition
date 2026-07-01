@@ -2504,7 +2504,7 @@ static void move_start_init(struct move_info *move, bool in_graphics)
 	if (!scene_b)
 		scene_b = obs_group_from_source(move->scene_source_b);
 	if (scene_b) {
-		//put items in todo array
+		// Put items in a temporary array before iterating in reverse order.
 		DARRAY(obs_sceneitem_t *) items;
 		da_init(items);
 		obs_scene_enum_items(scene_b, darray_sceneitem_push_back, &items);
