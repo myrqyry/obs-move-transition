@@ -96,83 +96,77 @@ static bool mp_move_log_error(struct mediapipe_move_info *filter, bool success, 
 	return true;
 }
 
-static float mp_denormalize_x(float normalized_x, uint32_t width) { return normalized_x * (float)width; }
-static float mp_denormalize_y(float normalized_y, uint32_t height) { return normalized_y * (float)height; }
-
-static bool mp_move_action_get_float(struct mediapipe_move_info *filter, struct nvidia_move_action *action, bool easing, float *v)
+static bool mp_check_model(const char *name)
 {
-    // ... [existing implementation]
-    return false;
-}
-
-static void mp_move_action_get_vec2(struct mediapipe_move_info *filter, struct nvidia_move_action *action, bool easing, struct vec2 *value)
-{
-    // ... [existing implementation]
-}
-
-static void mp_move_update(void *data, obs_data_t *settings)
-{
-    struct mediapipe_move_info *filter = (struct mediapipe_move_info *)data;
-    // ... [implementation from nvidia-move-filter.c adapted]
+	char *path = obs_module_file(name);
+	bool exists = os_file_exists(path);
+	if (!exists) {
+		blog(LOG_ERROR, "[MediaPipe] Model file missing: %s. Please download from: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task", name);
+	}
+	bfree(path);
+	return exists;
 }
 
 static void *mp_move_create(obs_data_t *settings, obs_source_t *context)
 {
-    if (!mediapipe_is_loaded()) return NULL;
-    struct mediapipe_move_info *filter = (struct mediapipe_move_info *)bzalloc(sizeof(*filter));
-    filter->source = context;
-    // ... [implementation from nvidia-move-filter.c adapted]
-    return filter;
+	if (!mediapipe_is_loaded()) return NULL;
+	if (!mp_check_model("face_landmarker.task")) return NULL;
+	if (!mp_check_model("pose_landmarker.task")) return NULL;
+
+	struct mediapipe_move_info *filter = (struct mediapipe_move_info *)bzalloc(sizeof(*filter));
+	filter->source = context;
+
+	mp_api_t *api = mediapipe_get_api();
+	char *face_model_path = obs_module_file("face_landmarker.task");
+	char *pose_model_path = obs_module_file("pose_landmarker.task");
+	if (!api->create_face_landmarker(face_model_path, (mp_face_landmarker_t **)&filter->face_graph)) {
+		blog(LOG_ERROR, "[MediaPipe] Failed to create face landmarker");
+	}
+	if (!api->create_pose_landmarker(pose_model_path, (mp_pose_landmarker_t **)&filter->pose_graph)) {
+		blog(LOG_ERROR, "[MediaPipe] Failed to create pose landmarker");
+	}
+	bfree(face_model_path);
+	bfree(pose_model_path);
+
+	char *effect_path = obs_module_file("effects/unorm.effect");
+	obs_enter_graphics();
+	filter->effect = gs_effect_create_from_file(effect_path, NULL);
+	bfree(effect_path);
+	if (filter->effect) {
+		filter->image_param = gs_effect_get_param_by_name(filter->effect, "image");
+		filter->multiplier_param = gs_effect_get_param_by_name(filter->effect, "multiplier");
+	}
+	obs_leave_graphics();
+
+	filter->space = GS_CS_SRGB;
+	obs_source_update(context, settings);
+	return filter;
 }
 
 static void mp_move_destroy(void *data)
 {
-    struct mediapipe_move_info *filter = (struct mediapipe_move_info *)data;
-    da_free(filter->actions);
-    obs_queue_task(OBS_TASK_GRAPHICS, mp_move_actual_destroy, data, false);
+	struct mediapipe_move_info *filter = (struct mediapipe_move_info *)data;
+	da_free(filter->actions);
+	obs_queue_task(OBS_TASK_GRAPHICS, mp_move_actual_destroy, data, false);
 }
 
 static void mp_move_actual_destroy(void *data)
 {
-    struct mediapipe_move_info *filter = (struct mediapipe_move_info *)data;
-    bfree(filter->last_error);
-    bfree(filter);
+	struct mediapipe_move_info *filter = (struct mediapipe_move_info *)data;
+	bfree(filter->last_error);
+	bfree(filter);
 }
 
-static void mp_move_render(void *data, gs_effect_t *effect)
-{
-    // ... [implementation from nvidia-move-filter.c adapted]
-}
-
-static void mp_move_tick(void *data, float t)
-{
-    // ... [implementation from nvidia-move-filter.c adapted]
-}
-
-static enum gs_color_space mp_move_get_color_space(void *data, size_t count, const enum gs_color_space *preferred_spaces)
-{
-    // ... [implementation from nvidia-move-filter.c adapted]
-    return GS_CS_SRGB;
-}
-
-static void mp_move_defaults(obs_data_t *settings)
-{
-    obs_data_set_default_int(settings, "actions", 1);
-}
-
-static obs_properties_t *mp_move_properties(void *data)
-{
-    // ... [implementation from nvidia-move-filter.c adapted]
-    return NULL;
-}
-
+static void mp_move_render(void *data, gs_effect_t *effect) {}
+static void mp_move_tick(void *data, float t) {}
+static enum gs_color_space mp_move_get_color_space(void *data, size_t count, const enum gs_color_space *preferred_spaces) { return GS_CS_SRGB; }
+static void mp_move_defaults(obs_data_t *settings) { obs_data_set_default_int(settings, "actions", 1); }
+static obs_properties_t *mp_move_properties(void *data) { return obs_properties_create(); }
 static void mp_move_fill_body_list(obs_property_t *p) {}
 static void mp_move_fill_landmark_list(obs_property_t *p) {}
 static void mp_move_fill_expression_list(obs_property_t *p) {}
-
 static void swap_setting(obs_data_t *settings, char *setting1, char *setting2) {}
 static void swap_action(obs_data_t *settings, long long a, long long b) {}
-
 static bool mp_move_move_up_clicked(obs_properties_t *props, obs_property_t *property, void *data) { return true; }
 static bool mp_move_move_down_clicked(obs_properties_t *props, obs_property_t *property, void *data) { return true; }
 static bool mp_move_get_value_clicked(obs_properties_t *props, obs_property_t *property, void *data) { return true; }
@@ -181,6 +175,9 @@ static bool mp_move_landmark_changed(void *priv, obs_properties_t *props, obs_pr
 static bool mp_move_body_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings) { return true; }
 static bool mp_move_expression_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings) { return true; }
 static bool mp_move_actions_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings) { return true; }
+static void mp_move_update(void *data, obs_data_t *settings) {}
+static bool mp_move_action_get_float(struct mediapipe_move_info *filter, struct nvidia_move_action *action, bool easing, float *v) { *v = 0.0f; return false; }
+static void mp_move_action_get_vec2(struct mediapipe_move_info *filter, struct nvidia_move_action *action, bool easing, struct vec2 *value) { value->x = 0.0f; value->y = 0.0f; }
 
 struct obs_source_info mediapipe_move_filter = {
 	.id = "mp_move_filter",
