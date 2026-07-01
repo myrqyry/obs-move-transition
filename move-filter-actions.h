@@ -165,4 +165,26 @@
 #define BODY_ANGLE_Z             20
 #define BODY_ANGLE               21
 
+// Shared action struct - used by both nvidia-move-filter.c and mediapipe-move-filter.cpp
+struct nvidia_move_action {
+	uint32_t action;
+	obs_weak_source_t *target;
+	char *name;
+	bool is_int;
+	uint32_t property;
+	float diff;
+	float diff2;
+	float factor;
+	float factor2;
+	uint32_t feature;
+	uint32_t feature_property;
+	int32_t feature_number[4];
+	float threshold;
+	float required_confidence;
+	float easing;
+	float previous_float;
+	struct vec2 previous_vec2;
+	bool disabled;
+};
+
 #endif // MOVE_FILTER_ACTIONS_H

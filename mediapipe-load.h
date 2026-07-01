@@ -4,6 +4,7 @@
 #define MEDIAPIPE_MOVE_FILTER_H
 
 #include <stdbool.h>
+#include <util/darray.h>
 
 // MediaPipe graph handles for different feature types
 typedef struct mp_graph_t mp_graph_t;
@@ -78,6 +79,5 @@ bool mediapipe_load_library(void);
 void mediapipe_unload_library(void);
 bool mediapipe_is_loaded(void);
 mp_api_t *mediapipe_get_api(void);
-const char *mediapipe_get_last_error(void);
 
 #endif // MEDIAPIPE_MOVE_FILTER_H
