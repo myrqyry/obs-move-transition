@@ -40,10 +40,11 @@ typedef struct {
 
 // Result containers
 typedef struct {
-	DARRAY(mp_point2f) landmarks;
+	DARRAY(mp_point3f) landmarks;	// MediaPipe outputs 478 3D landmarks
 	DARRAY(float) landmarks_visibility;
 	DARRAY(float) blendshape_coefficients;
 	mp_rect_t bounding_box;
+	float face_transform_matrix[16]; // 4x4 row-major, enabled via output_transform_matrix
 } mp_face_result_t;
 
 typedef struct {
@@ -52,13 +53,24 @@ typedef struct {
 	DARRAY(float) visibility;
 } mp_pose_result_t;
 
+typedef struct {
+    int    num_faces;                    // default 1
+    float  min_detection_confidence;    // default 0.5
+    float  min_presence_confidence;     // default 0.5
+    float  min_tracking_confidence;     // default 0.5
+    bool   output_blendshapes;          // must be true for FEATURE_EXPRESSION
+    bool   output_transform_matrix;     // true for FEATURE_POSE
+    void (*result_callback)(const mp_face_result_t *result, void *userdata);
+    void  *callback_userdata;
+} mp_face_landmarker_options_t;
+
 // Dynamic API table
 typedef struct {
 	bool loaded;
 	void *handle;
 
 	// MediaPipe Tasks API functions
-	bool (*create_face_landmarker)(const char *model_path, mp_face_landmarker_t **landmarker);
+	bool (*create_face_landmarker)(const mp_face_landmarker_options_t *options, const char *model_path, mp_face_landmarker_t **landmarker);
 	bool (*detect_face)(mp_face_landmarker_t *landmarker, const void *input, mp_face_result_t *result);
 	void (*destroy_face_landmarker)(mp_face_landmarker_t *landmarker);
 	bool (*create_pose_landmarker)(const char *model_path, mp_pose_landmarker_t **landmarker);
