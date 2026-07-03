@@ -6,6 +6,7 @@
 #include "easing.h"
 #include <util/threading.h>
 #include "obs-websocket-api.h"
+#include "mediapipe-load.h"
 
 struct move_info {
 	obs_source_t *source;
@@ -3476,7 +3477,7 @@ bool obs_module_load(void)
 	obs_register_source(&move_directshow_filter);
 #endif
 #ifdef ENABLE_MEDIAPIPE_MOVE
-	if (mediapipe_is_loaded())
+	if (mediapipe_load_library())
 		mp_move_register();
 #endif
 	obs_register_source(&move_wave_value_filter);

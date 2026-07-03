@@ -1522,7 +1522,7 @@ void move_action_execute(void *data)
 			obs_scene_t *scene = obs_scene_from_source(scene_source);
 			if (!scene)
 				scene = obs_group_from_source(scene_source);
-			obs_sceneitem_t *item = obs_scene_find_source_recursive(scene, move_action->sceneitem_name);
+			obs_sceneitem_t *item = scene ? obs_scene_find_source_recursive(scene, move_action->sceneitem_name) : NULL;
 			if (item) {
 
 				if (move_action->enable == MOVE_ACTION_TOGGLE) {

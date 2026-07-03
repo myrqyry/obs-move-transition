@@ -1,11 +1,8 @@
-// Move filter actions - shared constants and structs
-// This file contains all ACTION_*, FEATURE_*, ATTACH_*, and SCENEITEM_PROPERTY_*
-// defines used by both nvidia-move-filter.c and mediapipe-move-filter.cpp.
-// Guards against duplicate inclusion to allow both nvidia and mediapipe filters
-// to share the same settings and action definitions while keeping separate dynamics.
-
 #ifndef MOVE_FILTER_ACTIONS_H
 #define MOVE_FILTER_ACTIONS_H
+
+#include <obs.h>
+#include <graphics/vec2.h>
 
 // Action types for filter operations - mirror NVIDIA pattern exactly
 #define ACTION_MOVE_SOURCE          0
@@ -33,8 +30,6 @@
 #define ATTACH_FOREHEAD            15
 
 // Scene item property identifiers - sequential indices for serialization
-// Must match exactly between nvidia-move-filter.c and mediapipe-move-filter.cpp
-// to allow settings interchange when the user switches backends.
 #define SCENEITEM_PROPERTY_ALL       0
 #define SCENEITEM_PROPERTY_POS       1
 #define SCENEITEM_PROPERTY_POSX      2
@@ -48,10 +43,7 @@
 #define SCENEITEM_PROPERTY_CROP_BOTTOM 10
 #define SCENEITEM_PROPERTY_CROP_TOP   11
 
-// Feature identifiers - trackable elements in both MediaPipe and NVIDIA AR SDKs
-// Feature indices are serialized and controlled by user settings. These are shared
-// across both nvidia-move-filter.c and mediapipe-move-filter.cpp to ensure identical
-// UI content and algorithm behavior across the two backends.
+// Feature identifiers - trackable elements
 #define FEATURE_BOUNDINGBOX         0
 #define FEATURE_LANDMARK             1
 #define FEATURE_POSE                2
@@ -59,17 +51,15 @@
 #define FEATURE_GAZE                4
 #define FEATURE_BODY                5
 
-// Bounding box sub-features - normalize property naming across backends
-// Mirror NVIDIA's naming convention to ensure cross-backend consistency.
-// BOTOM field renamed to BOW for better consistency and clarity.
+// Bounding box sub-features
 #define FEATURE_BOUNDINGBOX_LEFT             0
 #define FEATURE_BOUNDINGBOX_HORIZONTAL_CENTER 1
 #define FEATURE_BOUNDINGBOX_RIGHT             2
-#define FEATURE_BOUNDINGBOX_WIDTH             3
-#define FEATURE_BOUNDINGBOX_TOP              4
-#define FEATURE_BOUNDINGBOX_VERTICAL_CENTER  5
-#define FEATURE_BOUNDINGBOX_BOW               6
-#define FEATURE_BOUNDINGBOX_HEIGHT           7
+#define FEATURE_BOUNDINGBOX_TOP               3
+#define FEATURE_BOUNDINGBOX_VERTICAL_CENTER   4
+#define FEATURE_BOUNDINGBOX_BOTOM             5
+#define FEATURE_BOUNDINGBOX_WIDTH             6
+#define FEATURE_BOUNDINGBOX_HEIGHT            7
 #define FEATURE_BOUNDINGBOX_TOP_LEFT           8
 #define FEATURE_BOUNDINGBOX_TOP_CENTER        9
 #define FEATURE_BOUNDINGBOX_TOP_RIGHT        10
@@ -81,9 +71,7 @@
 #define FEATURE_BOUNDINGBOX_CENTER           16
 #define FEATURE_BOUNDINGBOX_SIZE             17
 
-// Landmark sub-features - streamlined property identifiers for keypoint data
-// Includes confidence score and keypoint positioning information for comprehensive
-// landmark analysis and tracking capabilities.
+// Landmark sub-features
 #define FEATURE_LANDMARK_X                 0
 #define FEATURE_LANDMARK_Y                 1
 #define FEATURE_LANDMARK_CONFIDENCE         2
@@ -94,7 +82,7 @@
 #define FEATURE_LANDMARK_DIFF              7
 #define FEATURE_LANDMARK_POS               8
 
-// Threshold for landmark visibility - hide points below specified reliability
+// Threshold for landmark visibility
 #define FEATURE_THRESHOLD_NONE                      0
 #define FEATURE_THRESHOLD_ENABLE_OVER                1
 #define FEATURE_THRESHOLD_ENABLE_UNDER               2
@@ -103,15 +91,13 @@
 #define FEATURE_THRESHOLD_ENABLE_OVER_DISABLE_UNDER  5
 #define FEATURE_THRESHOLD_ENABLE_UNDER_DISABLE_OVER  6
 
-// Pose landmarks - 3D joint positioning coordinates
-// Horizontal rotation tracking values across body segments
+// Pose landmarks
 #define FEATURE_POSE_X                      0
 #define FEATURE_POSE_Y                      1
 #define FEATURE_POSE_Z                      2
 #define FEATURE_POSE_W                      3
 
-// Gaze tracking features - precise eye movement measurement
-// Encodes both vector and head translation data for comprehensive gaze analysis
+// Gaze tracking features
 #define FEATURE_GAZE_VECTOR                  0
 #define FEATURE_GAZE_VECTOR_PITCH           1
 #define FEATURE_GAZE_VECTOR_YAW             2
@@ -125,8 +111,7 @@
 #define FEATURE_GAZE_DIRECTION_VECTOR_Y    10
 #define FEATURE_GAZE_DIRECTION_VECTOR_Z    11
 
-// Facial expression metrics - comprehensive animation system for emotional expression
-// Supports both single and multi-point expression rendering across facial regions
+// Facial expression metrics
 #define FEATURE_EXPRESSION_SINGLE        0
 #define FEATURE_EXPRESSION_VECTOR        1
 #define FEATURE_EXPRESSION_ADD           2
@@ -134,8 +119,7 @@
 #define FEATURE_EXPRESSION_DISTANCE     4
 #define FEATURE_EXPRESSION_AVG          5
 
-// Body segmentation features - complete skeletal point and joint angle analysis
-// Includes wrist, jaw, and forehead tracking for comprehensive body detection
+// Body segmentation features
 #define BODY_CONFIDENCE                  0
 #define BODY_2D_POSX                     1
 #define BODY_2D_POSY                     2
@@ -159,11 +143,9 @@
 #define BODY_ANGLE_Z                    20
 #define BODY_ANGLE                      21
 
-// NVIDIA-specific body angles - creative naming for specific joint rotations
-#define BODY_ANGLE_X             18
-#define BODY_ANGLE_Y             19
-#define BODY_ANGLE_Z             20
-#define BODY_ANGLE               21
+// Forward declarations
+typedef struct obs_weak_source obs_weak_source_t;
+struct vec2;
 
 // Shared action struct - used by both nvidia-move-filter.c and mediapipe-move-filter.cpp
 struct nvidia_move_action {

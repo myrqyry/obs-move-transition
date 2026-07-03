@@ -394,16 +394,18 @@ static void move_source_swap_destroy(void *data)
 	
 	if (!source1 && move_source_swap->source_name1 && strlen(move_source_swap->source_name1)) {
 		source1 = obs_get_source_by_name(move_source_swap->source_name1);
-		obs_source_release(source1);
 	}
 	if (!source2 && move_source_swap->source_name2 && strlen(move_source_swap->source_name2)) {
 		source2 = obs_get_source_by_name(move_source_swap->source_name2);
-		obs_source_release(source2);
 	}
 	if (source1)
 		move_source_swap_source_disconnect_signals(source1, data);
 	if (source2)
 		move_source_swap_source_disconnect_signals(source2, data);
+	if (source1)
+		obs_source_release(source1);
+	if (source2)
+		obs_source_release(source2);
 	
 	move_source_swap->scene_item1 = NULL;
 	move_source_swap->scene_item2 = NULL;

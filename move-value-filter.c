@@ -300,10 +300,11 @@ void move_value_start(struct move_value_info *move_value)
 	}
 	if (move_value->move_filter.reverse)
 		return;
+	bool source_from_weak = false;
 	obs_source_t *source = NULL;
 	if (move_value->setting_filter_name && strlen(move_value->setting_filter_name)) {
 		source = obs_weak_source_get_source(move_value->filter);
-		obs_source_release(source);
+		source_from_weak = true;
 	} else {
 		source = obs_filter_get_parent(move_value->move_filter.source);
 	}
@@ -401,6 +402,8 @@ void move_value_start(struct move_value_info *move_value)
 		move_value->double_to = move_value->double_value;
 	}
 	obs_data_release(ss);
+	if (source_from_weak)
+		obs_source_release(source);
 }
 
 bool move_value_start_button(obs_properties_t *props, obs_property_t *property, void *data)
@@ -423,9 +426,9 @@ void move_value_update(void *data, obs_data_t *settings)
 	if (!move_value->setting_filter_name || strcmp(move_value->setting_filter_name, setting_filter_name) != 0) {
 		obs_weak_source_release(move_value->filter);
 		move_value->filter = NULL;
+		bfree(move_value->setting_filter_name);
+		move_value->setting_filter_name = bstrdup(setting_filter_name);
 		if (parent) {
-			bfree(move_value->setting_filter_name);
-			move_value->setting_filter_name = bstrdup(setting_filter_name);
 			obs_source_t *filter = obs_source_get_filter_by_name(parent, move_value->setting_filter_name);
 			move_value->filter = obs_source_get_weak_source(filter);
 			obs_source_release(filter);
@@ -566,9 +569,10 @@ bool move_value_get_value(obs_properties_t *props, obs_property_t *property, voi
 	struct move_value_info *move_value = data;
 	bool settings_changed = false;
 	obs_source_t *source;
+	bool source_from_weak = false;
 	if (move_value->filter) {
 		source = obs_weak_source_get_source(move_value->filter);
-		obs_source_release(source);
+		source_from_weak = true;
 	} else {
 		source = obs_filter_get_parent(move_value->move_filter.source);
 	}
@@ -2042,6 +2046,8 @@ void move_value_tick(void *data, float seconds)
 	obs_data_release(ss);
 	if (update)
 		obs_source_update(source, NULL);
+	if (source_from_weak)
+		obs_source_release(source);
 	if (!move_value->move_filter.moving) {
 		move_filter_ended(&move_value->move_filter);
 	}
