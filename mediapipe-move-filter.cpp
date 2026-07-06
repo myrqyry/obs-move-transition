@@ -2267,7 +2267,7 @@ struct obs_source_info mediapipe_move_filter = {
 	.video_tick = mp_move_tick,
 	.video_render = mp_move_render,
 	.filter_video = NULL,
-	.load = mp_move_update,
+	.load = NULL,
 	.video_get_color_space = mp_move_get_color_space,
 };
 
