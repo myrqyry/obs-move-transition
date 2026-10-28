@@ -52,6 +52,25 @@ int main(int argc,char**argv){
    for(unsigned i=0;i<n;i++){auto &p=out.face_landmarks[0].landmarks[i];loX=std::min(loX,p.x);hiX=std::max(hiX,p.x);loY=std::min(loY,p.y);hiY=std::max(hiY,p.y);}
   }
   printf("TASKS_FACE_RESULT status=%d faces=%u landmarks=%u x=[%.3f,%.3f] y=[%.3f,%.3f] blendshapes=%u matrices=%u err=%s\n",ret,out.face_landmarks_count,n,loX,hiX,loY,hiY,out.face_blendshapes_count,out.facial_transformation_matrixes_count,err?err:"none");
+  if(!ret && out.facial_transformation_matrixes_count && out.facial_transformation_matrixes) {
+    const auto &m=out.facial_transformation_matrixes[0];
+    if(m.data && m.rows==4 && m.columns==4) {
+      printf("TASKS_MATRIX rows=%u columns=%u data=",m.rows,m.columns);
+      for(unsigned j=0;j<16;++j)printf("%.3f%s",m.data[j],j==15?"\n":",");
+    }
+  }
+  if(!ret && out.face_blendshapes_count && out.face_blendshapes) {
+    const auto &cats=out.face_blendshapes[0];
+    printf("TASKS_EXPRESSIONS categories=%u browOuterUpLeft=%.4f eyeLookInLeft=%.4f\n",
+      cats.categories_count,
+      cats.categories_count>4?cats.categories[4].score:0.0f,
+      cats.categories_count>13?cats.categories[13].score:0.0f);
+    bool valid=cats.categories_count==52 && cats.categories &&
+      cats.categories[4].category_name && cats.categories[13].category_name &&
+      strcmp(cats.categories[4].category_name,"browOuterUpLeft")==0 &&
+      strcmp(cats.categories[13].category_name,"eyeLookInLeft")==0;
+    if(!valid)printf("TASKS_EXPRESSIONS INVALID_NAMING_OR_COUNT\\n");
+  }
   faceOk=ret==0&&n>=468&&n<=478&&hiX-loX>0.2f&&hiY-loY>0.2f;
   if(err){free_error(err);err=nullptr;}
   if(!ret)face_result_close(&out);

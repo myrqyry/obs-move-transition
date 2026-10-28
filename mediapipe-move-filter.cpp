@@ -2,6 +2,7 @@
 // Uses MediaPipe Tasks C++ API (FaceLandmarker, PoseLandmarker) via runtime loading
 
 #include "mediapipe-load.h"
+#include "mediapipe-pose-math.h"
 #include "move-filter-actions.h"
 #include <obs-module.h>
 #include <util/threading.h>
@@ -27,23 +28,7 @@ static void *mp_move_create(obs_data_t *settings, obs_source_t *context);
 static void mp_move_destroy(void *data);
 static void mp_move_actual_destroy(void *data);
 static void mp_move_render(void *data, gs_effect_t *effect);
-static obs_properties_t *mp_move_properties(void *data);
-static void mp_move_fill_body_list(obs_property_t *p);
-static void mp_move_fill_landmark_list(obs_property_t *p);
-static void mp_move_fill_expression_list(obs_property_t *p);
-static void mp_move_tick(void *data, float t);
-static enum gs_color_space mp_move_get_color_space(void *data, size_t count, const enum gs_color_space *preferred_spaces);
-static void mp_move_defaults(obs_data_t *settings);
-static void swap_setting(obs_data_t *settings, char *setting1, char *setting2);
-static void swap_action(obs_data_t *settings, long long a, long long b);
-static bool mp_move_move_up_clicked(obs_properties_t *props, obs_property_t *property, void *data);
-static bool mp_move_move_down_clicked(obs_properties_t *props, obs_property_t *property, void *data);
-static bool mp_move_get_value_clicked(obs_properties_t *props, obs_property_t *property, void *data);
-static bool mp_move_feature_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings);
-static bool mp_move_landmark_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings);
-static bool mp_move_body_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings);
-static bool mp_move_expression_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings);
-static bool mp_move_actions_changed(void *priv, obs_properties_t *props, obs_property_t *property, obs_data_t *settings);
+obs_properties_t *mp_move_properties(void *data);
 extern "C" void mp_move_register(void);
 
 // MediaPipe Move Filter struct
@@ -951,6 +936,8 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 								da_resize(filter->landmarks_confidence, 0);
 								da_resize(filter->expressions, 0);
 								memset(&filter->bbox, 0, sizeof(filter->bbox));
+								memset(filter->face_transform_matrix, 0,
+								       sizeof(filter->face_transform_matrix));
 							}
 
 						// Parse face landmarks
@@ -1213,27 +1200,25 @@ static bool mp_move_action_get_float(struct mediapipe_move_info *filter,
 		break;
 	}
 	case FEATURE_EXPRESSION: {
-		if (filter->expressions.num > 0 &&
-		    action->feature_number[0] >= 0 &&
-		    (uint32_t)action->feature_number[0] <
-			    filter->expressions.num) {
-			switch (action->feature_property) {
-			case FEATURE_EXPRESSION_SINGLE:
-				*v = filter->expressions
-					     .array[action->feature_number[0]];
-				success = true;
-				break;
-			case FEATURE_EXPRESSION_AVG:
-			case FEATURE_EXPRESSION_ADD:
-			case FEATURE_EXPRESSION_SUBSTRACT:
-			case FEATURE_EXPRESSION_DISTANCE:
-			case FEATURE_EXPRESSION_VECTOR:
-				// Multi-expression features use vec2 pattern
-				success = false;
-				break;
-			default:
-				break;
-			}
+		const int32_t idx1 = action->feature_number[0];
+		const int32_t idx2 = action->feature_number[1];
+		if (idx1 < 0 || (size_t)idx1 >= filter->expressions.num)
+			break;
+		const float a = filter->expressions.array[idx1];
+		if (action->feature_property == FEATURE_EXPRESSION_SINGLE) {
+			*v = a;
+			success = true;
+			break;
+		}
+		if (idx2 < 0 || (size_t)idx2 >= filter->expressions.num)
+			break;
+		const float b = filter->expressions.array[idx2];
+		switch (action->feature_property) {
+		case FEATURE_EXPRESSION_AVG: *v = (a + b) / 2.0f; success = true; break;
+		case FEATURE_EXPRESSION_ADD: *v = a + b; success = true; break;
+		case FEATURE_EXPRESSION_SUBSTRACT: *v = a - b; success = true; break;
+		case FEATURE_EXPRESSION_DISTANCE: *v = fabsf(a - b); success = true; break;
+		default: break;
 		}
 		break;
 	}
@@ -1306,34 +1291,64 @@ static bool mp_move_action_get_float(struct mediapipe_move_info *filter,
 		break;
 	}
 	case FEATURE_POSE: {
-		// Single-valued pose properties
-		if (filter->face_transform_matrix[0] != 0.0f ||
-		    filter->face_transform_matrix[5] != 0.0f) {
+		mp_quaternion rotation;
+		if (mp_rotation_from_matrix(filter->face_transform_matrix,
+					    &rotation)) {
 			switch (action->feature_property) {
-			case FEATURE_POSE_X:
-				*v = filter->face_transform_matrix[12];
-				success = true;
-				break;
-			case FEATURE_POSE_Y:
-				*v = filter->face_transform_matrix[13];
-				success = true;
-				break;
-			case FEATURE_POSE_Z:
-				*v = filter->face_transform_matrix[14];
-				success = true;
-				break;
-			case FEATURE_POSE_W:
-				*v = filter->face_transform_matrix[15];
-				success = true;
-				break;
-			default:
-				break;
+			case FEATURE_POSE_X: *v = rotation.x; success = true; break;
+			case FEATURE_POSE_Y: *v = rotation.y; success = true; break;
+			case FEATURE_POSE_Z: *v = rotation.z; success = true; break;
+			case FEATURE_POSE_W: *v = rotation.w; success = true; break;
+			default: break;
 			}
 		}
 		break;
 	}
 	default:
 		break;
+	}
+
+	// MediaPipe's image coordinates are normalized [0,1]. NVIDIA Move's
+	// matching position/distance action values are in video pixels.
+	if (success) {
+		if (action->feature == FEATURE_BOUNDINGBOX) {
+			switch (action->feature_property) {
+			case FEATURE_BOUNDINGBOX_LEFT:
+			case FEATURE_BOUNDINGBOX_HORIZONTAL_CENTER:
+			case FEATURE_BOUNDINGBOX_RIGHT:
+			case FEATURE_BOUNDINGBOX_WIDTH:
+				*v *= (float)filter->width;
+				break;
+			case FEATURE_BOUNDINGBOX_TOP:
+			case FEATURE_BOUNDINGBOX_VERTICAL_CENTER:
+			case FEATURE_BOUNDINGBOX_BOTOM:
+			case FEATURE_BOUNDINGBOX_HEIGHT:
+				*v *= (float)filter->height;
+				break;
+			case FEATURE_BOUNDINGBOX_SIZE:
+				*v *= (float)filter->width * (float)filter->height;
+				break;
+			default: break;
+			}
+		} else if (action->feature == FEATURE_LANDMARK) {
+			switch (action->feature_property) {
+			case FEATURE_LANDMARK_X:
+			case FEATURE_LANDMARK_DIFF_X:
+				*v *= (float)filter->width;
+				break;
+			case FEATURE_LANDMARK_Y:
+			case FEATURE_LANDMARK_DIFF_Y:
+				*v *= (float)filter->height;
+				break;
+			default: break;
+			}
+		} else if (action->feature == FEATURE_BODY) {
+			switch (action->feature_property) {
+			case BODY_2D_POSX: *v *= (float)filter->width; break;
+			case BODY_2D_POSY: *v *= (float)filter->height; break;
+			default: break;
+			}
+		}
 	}
 
 	if (success && easing) {
@@ -1473,9 +1488,11 @@ static bool mp_move_action_get_vec2(struct mediapipe_move_info *filter,
 				}
 				break;
 			case FEATURE_EXPRESSION_VECTOR:
-				if (idx1 >= 0 &&
-				    (uint32_t)idx1 < filter->expressions.num) {
+				if (idx1 >= 0 && idx2 >= 0 &&
+				    (uint32_t)idx1 < filter->expressions.num &&
+				    (uint32_t)idx2 < filter->expressions.num) {
 					value->x = filter->expressions.array[idx1];
+					value->y = filter->expressions.array[idx2];
 					success = true;
 				}
 				break;
@@ -1678,6 +1695,17 @@ static bool mp_move_action_get_vec2(struct mediapipe_move_info *filter,
 		break;
 	}
 
+	// Keep 3D world coordinates and expression values unscaled; only
+	// project normalized 2D face/body features into video pixel space.
+	if (success &&
+	    (action->feature == FEATURE_BOUNDINGBOX ||
+	     action->feature == FEATURE_LANDMARK ||
+	     (action->feature == FEATURE_BODY &&
+	      action->feature_property <= BODY_2D_POS))) {
+		value->x *= (float)filter->width;
+		value->y *= (float)filter->height;
+	}
+
 	if (success && easing) {
 		value->x = action->previous_vec2.x * action->easing +
 			   value->x * (1.0f - action->easing);
@@ -1732,136 +1760,40 @@ static void mp_move_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "face_tracking_confidence", 0.5);
 }
 
-static obs_properties_t *mp_move_properties(void *data)
+// Access UI settings without exposing the filter's private layout to the editor.
+obs_data_t *mp_move_ui_settings(void *data)
 {
-	UNUSED_PARAMETER(data);
-	obs_properties_t *props = obs_properties_create();
-
-	obs_properties_add_int(props, "actions", "Actions", 1, MAX_ACTIONS, 1);
-
-	obs_properties_add_float_slider(props, "face_detection_confidence",
-					"Face Detection Confidence", 0.0,
-					1.0, 0.01);
-	obs_properties_add_float_slider(props, "face_presence_confidence",
-					"Face Presence Confidence", 0.0, 1.0,
-					0.01);
-	obs_properties_add_float_slider(props, "face_tracking_confidence",
-					"Face Tracking Confidence", 0.0, 1.0,
-					0.01);
-	UNUSED_PARAMETER(data);
-	return props;
+    auto *filter=static_cast<mediapipe_move_info *>(data);
+    return filter && filter->source ? obs_source_get_settings(filter->source) : nullptr;
 }
 
-static void mp_move_fill_body_list(obs_property_t *p)
+// UI commands operate on the same live action state as runtime evaluation.
+void mp_move_ui_apply_settings(void *data, obs_data_t *settings)
 {
-	UNUSED_PARAMETER(p);
+    auto *filter=static_cast<mediapipe_move_info *>(data);
+    if (filter && filter->source)
+        obs_source_update(filter->source, settings);
 }
 
-static void mp_move_fill_landmark_list(obs_property_t *p)
+bool mp_move_ui_action_value(void *data, int action_number, char *out,
+                             size_t capacity)
 {
-	UNUSED_PARAMETER(p);
-}
-
-static void mp_move_fill_expression_list(obs_property_t *p)
-{
-	UNUSED_PARAMETER(p);
-}
-
-static void swap_setting(obs_data_t *settings, char *setting1,
-			 char *setting2)
-{
-	UNUSED_PARAMETER(settings);
-	UNUSED_PARAMETER(setting1);
-	UNUSED_PARAMETER(setting2);
-}
-
-static void swap_action(obs_data_t *settings, long long a, long long b)
-{
-	UNUSED_PARAMETER(settings);
-	UNUSED_PARAMETER(a);
-	UNUSED_PARAMETER(b);
-}
-
-static bool mp_move_move_up_clicked(obs_properties_t *props,
-				    obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(data);
-	return true;
-}
-
-static bool mp_move_move_down_clicked(obs_properties_t *props,
-				      obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(data);
-	return true;
-}
-
-static bool mp_move_get_value_clicked(obs_properties_t *props,
-				      obs_property_t *property, void *data)
-{
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(data);
-	return true;
-}
-
-static bool mp_move_feature_changed(void *priv, obs_properties_t *props,
-				    obs_property_t *property,
-				    obs_data_t *settings)
-{
-	UNUSED_PARAMETER(priv);
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(settings);
-	return true;
-}
-
-static bool mp_move_landmark_changed(void *priv, obs_properties_t *props,
-				     obs_property_t *property,
-				     obs_data_t *settings)
-{
-	UNUSED_PARAMETER(priv);
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(settings);
-	return true;
-}
-
-static bool mp_move_body_changed(void *priv, obs_properties_t *props,
-				 obs_property_t *property,
-				 obs_data_t *settings)
-{
-	UNUSED_PARAMETER(priv);
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(settings);
-	return true;
-}
-
-static bool mp_move_expression_changed(void *priv, obs_properties_t *props,
-				       obs_property_t *property,
-				       obs_data_t *settings)
-{
-	UNUSED_PARAMETER(priv);
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(settings);
-	return true;
-}
-
-static bool mp_move_actions_changed(void *priv, obs_properties_t *props,
-				    obs_property_t *property,
-				    obs_data_t *settings)
-{
-	UNUSED_PARAMETER(priv);
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(property);
-	UNUSED_PARAMETER(settings);
-	return true;
+    auto *filter=static_cast<mediapipe_move_info *>(data);
+    if (!out || !capacity || !filter || action_number < 1 ||
+        (size_t)action_number > filter->actions.num)
+        return false;
+    auto *action=filter->actions.array + action_number - 1;
+    struct vec2 value;
+    float scalar;
+    if (mp_move_action_get_vec2(filter, action, false, &value)) {
+        snprintf(out, capacity, "%.3f, %.3f", value.x, value.y);
+        return true;
+    }
+    if (mp_move_action_get_float(filter, action, false, &scalar)) {
+        snprintf(out, capacity, "%.3f", scalar);
+        return true;
+    }
+    return false;
 }
 
 // --- mp_move_update: full action parsing and handle lifecycle ---

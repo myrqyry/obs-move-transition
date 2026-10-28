@@ -141,12 +141,30 @@ external 256x256 RGBA image containing a visible face:
 These checks use genuine inference and isolated libobs/OpenGL rendering.
 The second test creates, renders and destroys the actual Move filter in
 default, face-only, body-only and combined modes; it also replaces the face
-with a blank frame to verify stale tracking is cleared. It never modifies
-the normal OBS scene collection or installed plugin.
+with a blank frame to verify stale tracking is cleared. It exercises
+the editor's action fields, dynamic selectors, pagination, and reordering,
+plus real scene item movement and visibility, facial attachment, body-driven
+movement, expression-vector movement and quaternion-valued head pose.
+It never modifies the normal OBS scene collection or installed plugin.
 
-Passing these tests does not establish full NVIDIA AR action parity:
-the per-action properties editor is still incomplete, and real OBS GUI,
-camera latency and all source movement actions remain to be verified.
+MediaPipe Move now exposes up to 40 configurable actions (Move source,
+Move value, Enable filter, Source visibility and Attach source), retaining
+NVIDIA Move's action-setting keys where semantics correspond. Normalized
+MediaPipe 2D coordinates are converted to video pixels for Move actions.
+The expression picker uses MediaPipe's 52 blendshape names and ordering;
+NVIDIA's expression indices are **not** automatically interchangeable.
+Head pose X/Y/Z/W uses the rotation quaternion derived from MediaPipe's
+facial transformation matrix rather than its translation components.
+
+Passing these tests **does not establish full NVIDIA AR Move parity**.
+Gaze output and some skeletal angle/3D body calculations remain missing.
+The real OBS settings GUI, every action combination, migration of existing
+NVIDIA profiles, camera latency and long-running live use remain unverified.
+The editor deliberately omits unsupported gaze/angle operations rather
+than offering choices that cannot produce meaningful values.
+
+To verify head-pose math independently, compile and run
+scripts/test-mediapipe-pose-math.cpp with g++ and the OBS headers.
 
 ## Credits
 

@@ -53,3 +53,34 @@ for mode in default face body both; do
   fi
   echo "MEDIAPIPE_MOVE $mode acquired=1 cleared=1 crash=0 PASS=1"
 done
+# Real libobs UI construction/callbacks and action dispatch tests.
+for mode in properties move attach body-move expression-vector pose-value reorder missing-filter missing-value; do
+  mkdir -p "$dir/home-$mode"
+  render_arg=none
+  [[ "$mode" == move || "$mode" == attach || "$mode" == body-move || "$mode" == expression-vector || "$mode" == pose-value ]] && render_arg=render
+  if ! HOME="$dir/home-$mode" XDG_CONFIG_HOME="$dir/home-$mode" \
+      xvfb-run -a timeout 35 "$dir/obs-probe" "$dir/bin/move-transition.so" "$data" \
+      "$mode" "$render_arg" "$face" >"$dir/$mode.log" 2>&1; then
+    echo "MEDIAPIPE_MOVE $mode failed:"; tail -45 "$dir/$mode.log"; exit 1
+  fi
+  if ! grep -q 'REPRO_PASS\|PROPERTIES_PASS\|REORDER_PASS' "$dir/$mode.log"; then
+    echo "MEDIAPIPE_MOVE $mode incomplete:"; tail -45 "$dir/$mode.log"; exit 1
+  fi
+  if [[ "$mode" == properties ]]; then
+    grep -q 'PROPERTIES_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == reorder ]]; then
+    grep -q 'REORDER_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == pose-value ]]; then
+    grep -q 'POSE_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == expression-vector ]]; then
+    grep -q 'EXPRESSION_VECTOR_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == attach ]]; then
+    grep -q 'ATTACH_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == body-move ]]; then
+    grep -q 'BODY_MOVE_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  elif [[ "$mode" == move ]]; then
+    grep -q 'MOVE_PASS' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+    grep -q 'Face tracking acquired (478 landmarks)' "$dir/$mode.log" || { tail -45 "$dir/$mode.log"; exit 1; }
+  fi
+  echo "MEDIAPIPE_MOVE $mode PASS=1"
+done

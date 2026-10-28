@@ -41,6 +41,8 @@ option(ENABLE_MEDIAPIPE_MOVE "Enable MediaPipe move filter" ${OS_LINUX})
 if(ENABLE_MEDIAPIPE_MOVE)
 	target_sources(${PROJECT_NAME} PRIVATE
 		mediapipe-move-filter.cpp
+		mediapipe-move-properties.cpp
+		mediapipe-pose-math.h
 		mediapipe-load.cpp
 		mediapipe-load.h)
 	target_compile_definitions(${PROJECT_NAME} PRIVATE ENABLE_MEDIAPIPE_MOVE)
