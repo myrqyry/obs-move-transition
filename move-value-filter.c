@@ -1834,10 +1834,11 @@ void move_value_tick(void *data, float seconds)
 	if (!move_filter_tick(&move_value->move_filter, seconds, &t))
 		return;
 
+	bool source_from_weak = false;
 	obs_source_t *source;
 	if (move_value->filter) {
 		source = obs_weak_source_get_source(move_value->filter);
-		obs_source_release(source);
+		source_from_weak = true;
 	} else {
 		source = obs_filter_get_parent(move_value->move_filter.source);
 	}
