@@ -50,16 +50,18 @@ typedef struct {
 
 // ----- Real MediaPipe Tasks C API structs -----
 
-// BaseOptionsC: model loading and delegate configuration
+// BaseOptionsC: model loading and delegate configuration.
+// ABI pinned to the installed MediaPipe Tasks C library: 56 bytes on x86_64.
+// Newer versions add fields, so do not substitute their header blindly.
 typedef struct {
-	char *model_asset_buffer;
+	const char *model_asset_buffer;
 	unsigned int model_asset_buffer_count;
-	char *model_asset_path;
-	int delegate;          // 0=CPU, 1=GPU
+	const char *model_asset_path;
+	int delegate;         // 0=CPU, 1=GPU
 	int host_environment;
 	int host_system;
-	char *host_version;
-	char *ca_bundle_path;
+	const char *host_version;
+	const char *ca_bundle_path;
 } BaseOptionsC;
 
 // Single normalized landmark
@@ -114,9 +116,9 @@ typedef struct {
 
 // Matrix (for facial transformation)
 typedef struct {
-	float *data;
 	uint32_t rows;
 	uint32_t columns;
+	float *data;
 } MatrixC;
 
 // FaceLandmarkerResult
@@ -141,6 +143,8 @@ typedef struct {
 
 // ImageProcessingOptions
 typedef struct {
+	int has_region_of_interest;
+	float left, top, right, bottom;
 	int rotation_degrees;
 } ImageProcessingOptionsC;
 
@@ -155,7 +159,6 @@ typedef struct {
 	bool output_face_blendshapes;
 	bool output_facial_transformation_matrixes;
 	void *result_callback;
-	void *callback_userdata;
 } FaceLandmarkerOptionsC;
 
 // PoseLandmarkerOptions: configuration for creating a PoseLandmarker
@@ -168,8 +171,18 @@ typedef struct {
 	float min_tracking_confidence;
 	bool output_segmentation_masks;
 	void *result_callback;
-	void *callback_userdata;
 } PoseLandmarkerOptionsC;
+
+#if defined(__cplusplus) && defined(__x86_64__) && defined(__linux__)
+// These layouts match the locally installed July 2026 libmediapipe.so.
+// Its CppFaceLandmarkerCreate reads running_mode at offset 0x38.
+static_assert(sizeof(BaseOptionsC) == 56, "MediaPipe BaseOptions ABI mismatch");
+static_assert(offsetof(FaceLandmarkerOptionsC, running_mode) == 56,
+              "MediaPipe FaceLandmarkerOptions ABI mismatch");
+static_assert(offsetof(PoseLandmarkerOptionsC, running_mode) == 56,
+              "MediaPipe PoseLandmarkerOptions ABI mismatch");
+static_assert(sizeof(MatrixC) == 16, "MediaPipe matrix ABI mismatch");
+#endif
 
 // ----- Dynamic API function table -----
 
@@ -178,10 +191,10 @@ typedef struct mp_api_t {
 	void *handle;
 
 	// MpImage functions
-	MpImage *(*image_create_from_uint8_data)(int width, int height,
-						 int channels,
-						 unsigned char *data,
-						 char **error_msg);
+	// MediaPipe Tasks C: returns MpStatus and fills an out pointer.
+	int (*image_create_from_uint8_data)(int format, int width, int height,
+					     const unsigned char *data, int data_size,
+					     MpImage **out, char **error_msg);
 	void (*image_free)(MpImage *image);
 
 	// Error handling
@@ -190,9 +203,9 @@ typedef struct mp_api_t {
 	// Face Landmarker
 	int (*face_landmarker_create)(FaceLandmarkerOptionsC *options,
 				     void **landmarker, char **error_msg);
-	void (*face_landmarker_detect_image)(void *landmarker, MpImage *image,
-					     ImageProcessingOptionsC *options,
-					     FaceLandmarkerResultC *result);
+	int (*face_landmarker_detect_image)(void *landmarker, MpImage *image,
+					    const ImageProcessingOptionsC *options,
+					    FaceLandmarkerResultC *result, char **error_msg);
 	void (*face_landmarker_close_result)(FaceLandmarkerResultC *result);
 	int (*face_landmarker_close)(void *landmarker, char **error_msg);
 

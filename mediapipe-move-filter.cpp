@@ -54,6 +54,8 @@ struct mediapipe_move_info {
 	void *pose_graph;
 	char *last_error;
 	bool got_new_frame;
+	bool face_tracking_active;
+	bool pose_tracking_active;
 	bool processing_stop;
 	bool target_valid;
 	bool initial_render;
@@ -232,6 +234,38 @@ static void mp_move_actual_destroy(void *data)
 	bfree(filter);
 }
 
+// MediaPipe Tasks C expects RGBA/SRGBA image data (format 2).
+// The OBS staging surface is BGRA; convert before constructing the image.
+static MpImage *mp_move_make_image(struct mediapipe_move_info *filter, mp_api_t *api, bool *converted)
+{
+	if (!filter->cpu_buffer || filter->width == 0 || filter->height == 0 ||
+	    filter->width > INT32_MAX / 4 / filter->height)
+		return NULL;
+	const size_t bytes = (size_t)filter->width * filter->height * 4;
+	// Both face and pose may use this frame; do not undo conversion on
+	// the second call.
+	if (!*converted) {
+		for (size_t i = 0; i < bytes; i += 4) {
+			const uint8_t blue = filter->cpu_buffer[i];
+			filter->cpu_buffer[i] = filter->cpu_buffer[i + 2];
+			filter->cpu_buffer[i + 2] = blue;
+		}
+		*converted = true;
+	}
+	MpImage *image = NULL;
+	char *error_msg = NULL;
+	const int result = api->image_create_from_uint8_data(
+		2, (int)filter->width, (int)filter->height, filter->cpu_buffer,
+		(int)bytes, &image, &error_msg);
+	if (result != 0 || !image) {
+		blog(LOG_ERROR, "[MediaPipe Move] MpImage creation failed (%d): %s",
+		     result, error_msg ? error_msg : "no details");
+	}
+	if (error_msg)
+		api->error_free(error_msg);
+	return result == 0 ? image : NULL;
+}
+
 // --- Render and detection ---
 
 static void mp_move_draw_frame(struct mediapipe_move_info *filter,
@@ -354,6 +388,7 @@ static void mp_move_apply_threshold_action(struct mediapipe_move_info *filter,
 					   struct nvidia_move_action *action,
 					   float value)
 {
+	UNUSED_PARAMETER(filter);
 	bool state = false;
 	bool eval = false;
 
@@ -399,7 +434,7 @@ static void mp_move_apply_threshold_action(struct mediapipe_move_info *filter,
 		obs_source_t *target_source =
 			obs_weak_source_get_source(action->target);
 		if (target_source) {
-			obs_source_filter_set_enabled(target_source, state);
+			obs_source_set_enabled(target_source, state);
 			obs_source_release(target_source);
 		}
 	} else if (action->action == ACTION_SOURCE_VISIBILITY) {
@@ -715,9 +750,13 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 
 	obs_source_t *const target = obs_filter_get_target(filter->source);
 	obs_source_t *const parent = obs_filter_get_parent(filter->source);
+	if (!target || !parent) {
+		obs_source_skip_video_filter(filter->source);
+		return;
+	}
 	uint32_t base_width = obs_source_get_base_width(target);
 	uint32_t base_height = obs_source_get_base_height(target);
-	if (!base_width || !base_height || !target || !parent) {
+	if (!base_width || !base_height) {
 		obs_source_skip_video_filter(filter->source);
 		return;
 	}
@@ -792,7 +831,8 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 		gs_texrender_reset(filter->render_unorm);
 	}
 
-	if (gs_texrender_begin_with_color_space(filter->render_unorm,
+	if (filter->render_unorm &&
+	    gs_texrender_begin_with_color_space(filter->render_unorm,
 						base_width, base_height,
 						GS_CS_SRGB)) {
 		const bool previous = gs_framebuffer_srgb_enabled();
@@ -843,6 +883,8 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 		}
 
 		if (filter->cpu_buffer) {
+			bool pixels_ready = false;
+			bool converted_to_rgba = false;
 			// Use staging surface for GPU→CPU readback
 			if (!filter->stage_surf ||
 			    gs_stagesurface_get_width(filter->stage_surf) != filter->width ||
@@ -864,15 +906,12 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 					filter->stage_surf,
 					&mapped_ptr, &mapped_linesize);
 				if (mapped && mapped_ptr) {
-					// Copy GPU data to cpu_buffer row-by-row, handling stride
-					uint32_t copy_width = filter->width * 4;
-					uint32_t min_linesize = mapped_linesize < copy_width
-									 ? mapped_linesize
-									 : copy_width;
-					for (uint32_t row = 0; row < filter->height; row++) {
-						memcpy(filter->cpu_buffer + row * copy_width,
-						       mapped_ptr + row * mapped_linesize,
-						       min_linesize);
+					const uint32_t copy_width = filter->width * 4;
+					if (mapped_linesize >= copy_width) {
+						for (uint32_t row = 0; row < filter->height; row++)
+							memcpy(filter->cpu_buffer + row * copy_width,
+							       mapped_ptr + row * mapped_linesize, copy_width);
+						pixels_ready = true;
 					}
 					gs_stagesurface_unmap(filter->stage_surf);
 				}
@@ -880,20 +919,39 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 				mp_api_t *api = mediapipe_get_api();
 
 				// --- Run face landmarker detection ---
-				if (filter->face_graph) {
-					MpImage *mp_image = api->image_create_from_uint8_data(
-						(int)filter->width,
-						(int)filter->height, 4,
-						filter->cpu_buffer, NULL);
+				if (pixels_ready && filter->face_graph) {
+					MpImage *mp_image = mp_move_make_image(filter, api, &converted_to_rgba);
 					if (mp_image) {
 						FaceLandmarkerResultC face_result;
 						memset(&face_result, 0,
 						       sizeof(face_result));
 
-						api->face_landmarker_detect_image(
-							filter->face_graph,
-							mp_image, NULL,
-							&face_result);
+						char *face_error = NULL;
+						const int face_status = api->face_landmarker_detect_image(
+							filter->face_graph, mp_image, NULL, &face_result,
+							&face_error);
+						if (face_status != 0) {
+							blog(LOG_ERROR, "[MediaPipe Move] Face detection failed (%d): %s",
+							     face_status, face_error ? face_error : "no details");
+						}
+						if (face_error)
+							api->error_free(face_error);
+						if (face_status == 0) {
+							const uint32_t count =
+								face_result.face_landmarks_count && face_result.face_landmarks
+								? face_result.face_landmarks[0].landmarks_count : 0;
+							const bool present = count > 0;
+							if (present != filter->face_tracking_active) {
+								blog(LOG_INFO, "[MediaPipe Move] Face tracking %s (%u landmarks)",
+								     present ? "acquired" : "lost", count);
+								filter->face_tracking_active = present;
+							}
+							if (!present) {
+								da_resize(filter->landmarks, 0);
+								da_resize(filter->landmarks_confidence, 0);
+								da_resize(filter->expressions, 0);
+								memset(&filter->bbox, 0, sizeof(filter->bbox));
+							}
 
 						// Parse face landmarks
 						if (face_result.face_landmarks_count > 0 &&
@@ -956,11 +1014,11 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 							filter->bbox.confidence = 1.0f;
 						}
 
-						api->face_landmarker_close_result(&face_result);
+							api->face_landmarker_close_result(&face_result);
+							filter->got_new_frame = true;
+							detection_done = true;
+						}
 						api->image_free(mp_image);
-
-						filter->got_new_frame = true;
-						detection_done = true;
 					} else {
 						mp_move_log_error(filter, false,
 								  "image_create_from_uint8_data");
@@ -968,11 +1026,8 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 				}
 
 				// --- Run pose landmarker detection ---
-				if (filter->pose_graph) {
-					MpImage *mp_image = api->image_create_from_uint8_data(
-						(int)filter->width,
-						(int)filter->height, 4,
-						filter->cpu_buffer, NULL);
+				if (pixels_ready && filter->pose_graph) {
+					MpImage *mp_image = mp_move_make_image(filter, api, &converted_to_rgba);
 					if (mp_image) {
 						PoseLandmarkerResultC pose_result;
 						memset(&pose_result, 0,
@@ -993,6 +1048,21 @@ static void mp_move_render(void *data, gs_effect_t *effect)
 						}
 
 						if (ret == 0) {
+							const uint32_t pose_count =
+								pose_result.pose_landmarks_count && pose_result.pose_landmarks
+								? pose_result.pose_landmarks[0].landmarks_count : 0;
+							const bool present = pose_count > 0;
+							if (present != filter->pose_tracking_active) {
+								blog(LOG_INFO, "[MediaPipe Move] Pose tracking %s (%u landmarks)",
+								     present ? "acquired" : "lost", pose_count);
+								filter->pose_tracking_active = present;
+							}
+							if (!present) {
+								da_resize(filter->keypoints, 0);
+								da_resize(filter->keypoints_confidence, 0);
+								da_resize(filter->keypoints3D, 0);
+							}
+
 							// Parse 2D pose landmarks
 							if (pose_result.pose_landmarks_count > 0 &&
 							    pose_result.pose_landmarks[0].landmarks_count > 0) {
@@ -2112,7 +2182,7 @@ static void mp_move_update(void *data, obs_data_t *settings)
 					model_path;
 				opts.base_options.delegate =
 					0; // CPU
-				opts.running_mode = 1; // IMAGE mode
+				opts.running_mode = 1; // MP_RUNNING_MODE_IMAGE
 				opts.num_faces = 1;
 				opts.min_face_detection_confidence =
 					filter->face_detection_confidence;
@@ -2180,7 +2250,7 @@ static void mp_move_update(void *data, obs_data_t *settings)
 					model_path;
 				opts.base_options.delegate =
 					0; // CPU
- 				opts.running_mode = 1; // IMAGE mode
+				opts.running_mode = 1; // MP_RUNNING_MODE_IMAGE
  				opts.num_poses = 1;
 				opts.min_pose_detection_confidence =
 					0.5f;

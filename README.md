@@ -123,6 +123,31 @@ experimental work on top of `exeldro/master`.
   on the new filters.
 - Adds regression checks for `Wave Move` and NVIDIA Move settings behavior.
 
+### MediaPipe Move: native runtime verification
+
+This fork loads the MediaPipe Tasks C library from beside the Move plugin
+and uses the installed face_landmarker.task and pose_landmarker_heavy.task.
+The dynamically loaded C structs and signatures are pinned to the local
+July 2026 library; a newer libmediapipe.so requires revalidating its ABI.
+
+On Linux, with the MediaPipe filter enabled in the build, verify with an
+external 256x256 RGBA image containing a visible face:
+
+```bash
+./scripts/verify-mediapipe-tasks-api.sh /path/to/libmediapipe.so /path/to/face_landmarker.task /path/to/pose_landmarker_heavy.task /path/to/face-256.rgba
+./scripts/verify-mediapipe-move-crash.sh build_x86_64/move-transition.so /path/to/libmediapipe.so /path/to/installed-plugin/data /path/to/face-256.rgba
+```
+
+These checks use genuine inference and isolated libobs/OpenGL rendering.
+The second test creates, renders and destroys the actual Move filter in
+default, face-only, body-only and combined modes; it also replaces the face
+with a blank frame to verify stale tracking is cleared. It never modifies
+the normal OBS scene collection or installed plugin.
+
+Passing these tests does not establish full NVIDIA AR action parity:
+the per-action properties editor is still incomplete, and real OBS GUI,
+camera latency and all source movement actions remain to be verified.
+
 ## Credits
 
 Move Transition is created and maintained by Exeldro. Support the original
