@@ -33,12 +33,17 @@ available only when their platform or runtime dependency is present.
 - `Move Source Swap` swaps source visibility during a movement.
 - `Move Value` changes source settings, filter settings, text values, random
   values, typed values, and numeric values over time.
+- `Wave Move` drives transforms, settings, visibility, or filter enable states
+  from generated wave values (this fork).
 - `Audio Move` drives movement from audio meter values.
 - `Move Action` runs actions such as hotkeys, visibility changes, media
   controls, audio changes, and frontend actions.
 - `Audio Move Action` runs actions from audio meter values.
 - `NVIDIA AR Move` links source movement to NVIDIA AR tracking data when the
   NVIDIA runtime is available.
+- `MediaPipe Move Filter` drives actions from face, pose, and expression
+  tracking when this fork is built with MediaPipe support and the required
+  runtime library and models are installed.
 - `Move Video Capture Device` controls supported DirectShow camera properties
   on Windows.
 
@@ -61,10 +66,19 @@ animated workflow.
 
 ## Installation
 
-Download the plugin from the
+For the **official upstream plugin**, use the
 [Move Transition resource page on the OBS forums](https://obsproject.com/forum/resources/move-transition.913/).
+That download is not necessarily built from this fork.
 
-On Flatpak installations, you can install the plugin from a terminal:
+For **this fork's builds**, see the artifacts attached to the
+[successful GitHub Actions run](https://github.com/myrqyry/obs-move-transition/actions/runs/40966922320).
+The workflow produces Windows x64, macOS universal, and Ubuntu 24.04/26.04
+packages. These are CI artifacts, not an official upstream release; inspect
+the package for your platform. Do not assume MediaPipe's separate
+`libmediapipe.so` and `.task` model files are included.
+
+For the upstream plugin on Flatpak installations, you can install it from
+a terminal:
 
 ```bash
 flatpak install com.obsproject.Studio.Plugin.MoveTransition
@@ -93,21 +107,40 @@ Use this path when you already build OBS Studio from source.
 
 Use this path when your system provides OBS development files.
 
-1. Install the package that provides OBS Studio development headers and
-   libraries.
-2. Configure and build the plugin:
+1. Install OBS Studio and the development files for `libobs` and
+   `obs-frontend-api`, plus CMake, Ninja, and a C/C++ compiler.
+2. Configure and build the plugin (the build directory matches the tests below):
 
 ```bash
-cmake -S . -B build -DBUILD_OUT_OF_TREE=On
-cmake --build build
+cmake -S . -B build_x86_64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_MEDIAPIPE_MOVE=ON
+cmake --build build_x86_64 -j4
 ```
+
+MediaPipe support is enabled by default on Linux and disabled by default on
+other platforms. To build without it, specify `-DENABLE_MEDIAPIPE_MOVE=OFF`.
+Enabling it compiles the filter but does not supply the separate MediaPipe
+runtime library or model files.
+
+### CI status and scope
+
+The [Push workflow](https://github.com/myrqyry/obs-move-transition/actions/workflows/push.yaml)
+builds and packages Windows x64, macOS universal, Ubuntu 24.04, and Ubuntu
+26.04. All four jobs succeeded for
+[commit `640cb09`](https://github.com/myrqyry/obs-move-transition/actions/runs/40966922320),
+including the Windows source-contract check for NVIDIA/DirectShow
+registration and persisted feature IDs.
+
+The separate clang-format and gersemi jobs are currently disabled; they
+are skipped, not passing checks. A green CI build does not establish that
+every filter works in the OBS GUI or that all MediaPipe actions have full
+platform/runtime support.
 
 ## This fork
 
 This repository tracks
 [exeldro/obs-move-transition](https://github.com/exeldro/obs-move-transition)
-and keeps Exeldro's plugin as the baseline. The local branch currently adds
-experimental work on top of `exeldro/master`.
+and keeps Exeldro's plugin as the baseline. The features below are additions
+in this fork's `master` branch, not claims about official upstream releases.
 
 - Adds `Wave Move`, a filter that drives transforms, settings, source
   visibility, and filter enable states from generated wave values.
