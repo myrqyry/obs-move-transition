@@ -123,6 +123,25 @@ experimental work on top of `exeldro/master`.
   on the new filters.
 - Adds regression checks for `Wave Move` and NVIDIA Move settings behavior.
 
+### Move Transition: scene and HDR regression test
+
+On Linux with the OBS development headers, g++, and xvfb-run installed, run:
+
+```bash
+./scripts/verify-move-transition.sh build_x86_64/move-transition.so /path/to/installed-plugin/data /path/to/libmediapipe.so
+```
+
+The MediaPipe library argument is optional. This isolated libobs/OpenGL test
+does not modify the installed OBS plugin or your scene collections.
+It drives the actual Move Transition with an active manual transition clock,
+verifies source movement using GPU pixel readback, and checks SDR rendering.
+For HDR, it uses an scRGB/RGBA16F input with a red channel of 2.0 and confirms
+that the rendered pixel remains above 1.0. This test reproduced a failure
+on the pre-upstream-merge binary and passed on the integrated binary.
+
+This does not cover OBS frontend-managed nested fades/start delays,
+real monitor output, or long-running stream behavior.
+
 ### MediaPipe Move: native runtime verification
 
 This fork loads the MediaPipe Tasks C library from beside the Move plugin
