@@ -12,6 +12,7 @@ struct move_info {
 	obs_source_t *source;
 	bool start_init;
 	bool first_frame;
+	pthread_mutex_t item_mutex;
 	DARRAY(struct move_item *) items_a;
 	DARRAY(struct move_item *) items_b;
 	float t;
@@ -164,6 +165,7 @@ static void *move_create(obs_data_t *settings, obs_source_t *source)
 	UNUSED_PARAMETER(settings);
 	struct move_info *move = bzalloc(sizeof(struct move_info));
 	move->source = source;
+	pthread_mutex_init(&move->item_mutex, NULL);
 	da_init(move->items_a);
 	da_init(move->items_b);
 	da_init(move->transition_pool_move);
@@ -176,6 +178,7 @@ static void *move_create(obs_data_t *settings, obs_source_t *source)
 static void clear_items(struct move_info *move, bool in_graphics)
 {
 	bool graphics = false;
+	pthread_mutex_lock(&move->item_mutex);
 	for (size_t i = 0; i < move->items_a.num; i++) {
 		struct move_item *item = move->items_a.array[i];
 		if (item->item_render) {
@@ -215,6 +218,7 @@ static void clear_items(struct move_info *move, bool in_graphics)
 	}
 	move->items_a.num = 0;
 	move->items_b.num = 0;
+	pthread_mutex_unlock(&move->item_mutex);
 }
 
 void clear_transition_pool(void *data)
@@ -248,6 +252,7 @@ static void move_destroy(void *data)
 		gs_samplerstate_destroy(move->point_sampler);
 		obs_leave_graphics();
 	}
+	pthread_mutex_destroy(&move->item_mutex);
 	bfree(move);
 }
 
@@ -309,12 +314,12 @@ void add_alignment(struct vec2 *v, uint32_t align, int32_t cx, int32_t cy)
 	if (align & OBS_ALIGN_RIGHT)
 		v->x += (float)cx;
 	else if ((align & OBS_ALIGN_LEFT) == 0)
-		v->x += (float)(cx >> 1);
+		v->x += (float)cx / 2.0f;
 
 	if (align & OBS_ALIGN_BOTTOM)
 		v->y += (float)cy;
 	else if ((align & OBS_ALIGN_TOP) == 0)
-		v->y += (float)(cy >> 1);
+		v->y += (float)cy / 2.0f;
 }
 
 void add_move_alignment(struct vec2 *v, uint32_t align_a, uint32_t align_b, float t, int32_t cx, int32_t cy)
@@ -322,22 +327,22 @@ void add_move_alignment(struct vec2 *v, uint32_t align_a, uint32_t align_b, floa
 	if (align_a & OBS_ALIGN_RIGHT)
 		v->x += (float)cx * (1.0f - t);
 	else if ((align_a & OBS_ALIGN_LEFT) == 0)
-		v->x += (float)(cx >> 1) * (1.0f - t);
+		v->x += (float)cx / 2.0f * (1.0f - t);
 
 	if (align_a & OBS_ALIGN_BOTTOM)
 		v->y += (float)cy * (1.0f - t);
 	else if ((align_a & OBS_ALIGN_TOP) == 0)
-		v->y += (float)(cy >> 1) * (1.0f - t);
+		v->y += (float)cy / 2.0f * (1.0f - t);
 
 	if (align_b & OBS_ALIGN_RIGHT)
 		v->x += (float)cx * t;
 	else if ((align_b & OBS_ALIGN_LEFT) == 0)
-		v->x += (float)(cx >> 1) * t;
+		v->x += (float)cx / 2.0f * t;
 
 	if (align_b & OBS_ALIGN_BOTTOM)
 		v->y += (float)cy * t;
 	else if ((align_b & OBS_ALIGN_TOP) == 0)
-		v->y += (float)(cy >> 1) * t;
+		v->y += (float)cy / 2.0f * t;
 }
 
 static bool crop_to_bounds(const obs_sceneitem_t *item, enum obs_bounds_type bt)
@@ -494,57 +499,84 @@ static inline bool item_texture_enabled(struct obs_scene_item *item)
 void pos_add_center(struct vec2 *pos, uint32_t alignment, uint32_t cx, uint32_t cy)
 {
 	if (alignment & OBS_ALIGN_LEFT) {
-		pos->x -= cx >> 1;
+		pos->x -= (float)cx / 2.0f;
 	} else if (alignment & OBS_ALIGN_RIGHT) {
-		pos->x += cx >> 1;
+		pos->x += (float)cx / 2.0f;
 	}
 	if (alignment & OBS_ALIGN_TOP) {
-		pos->y -= cy >> 1;
+		pos->y -= (float)cy / 2.0f;
 	} else if (alignment & OBS_ALIGN_BOTTOM) {
-		pos->y += cy >> 1;
+		pos->y += (float)cy / 2.0f;
 	}
 }
 
 void pos_subtract_center(struct vec2 *pos, uint32_t alignment, int32_t cx, int32_t cy)
 {
 	if (alignment & OBS_ALIGN_LEFT) {
-		pos->x += cx >> 1;
+		pos->x += (float)cx / 2.0f;
 	} else if (alignment & OBS_ALIGN_RIGHT) {
-		pos->x -= cx >> 1;
+		pos->x -= (float)cx / 2.0f;
 	}
 	if (alignment & OBS_ALIGN_TOP) {
-		pos->y += cy >> 1;
+		pos->y += (float)cy / 2.0f;
 	} else if (alignment & OBS_ALIGN_BOTTOM) {
-		pos->y -= cy >> 1;
+		pos->y -= (float)cy / 2.0f;
 	}
 }
 
-void calc_edge_position(struct vec2 *pos, long long position, uint32_t canvas_width, uint32_t canvas_height, uint32_t alignment,
-			int32_t cx, int32_t cy, float zoom)
+float rot_diff(float rot_a, float rot_b)
 {
-	int32_t cx2 = abs(cx >> 1);
-	int32_t cy2 = abs(cy >> 1);
-	if (zoom != 1.0f) {
-		cx2 = (int32_t)fabs((float)cx * zoom / 2.0f);
-		cy2 = (int32_t)fabs((float)cy * zoom / 2.0f);
-	}
+	float diff = rot_b - rot_a;
+	while (diff < -180.0f)
+		diff += 360.0f;
+	while (diff > 180.0f)
+		diff -= 360.0f;
+	return diff;
+}
 
+void calc_edge_position(struct vec2 *pos, long long position, uint32_t canvas_width, uint32_t canvas_height, uint32_t alignment,
+			int32_t cx, int32_t cy, float zoom, float rot)
+{
+	rot = rot_diff(rot, 0.0f);
+	float alignment_diff_x = 0.0f;
+	float alignment_diff_y = 0.0f;
+	if (alignment & OBS_ALIGN_LEFT) {
+		alignment_diff_x = -(float)cx / 2.0f;
+	} else if (alignment & OBS_ALIGN_RIGHT) {
+		alignment_diff_x = (float)cx / 2.0f;
+	}
+	if (alignment & OBS_ALIGN_TOP) {
+		alignment_diff_y = -(float)cy / 2.0f;
+	} else if (alignment & OBS_ALIGN_BOTTOM) {
+		alignment_diff_y = (float)cy / 2.0f;
+	}
+	float cx_rot = fabsf((float)cx);
+	float cy_rot = fabsf((float)cy);
+	if (rot != 0.0f) {
+		float rad = rot * (float)M_PI / 180.0f;
+		float cos_rot = cosf(rad);
+		float sin_rot = sinf(rad);
+		cx_rot = fabsf((float)cx * cos_rot) + fabsf((float)cy * sin_rot);
+		cy_rot = fabsf((float)cx * sin_rot) + fabsf((float)cy * cos_rot);
+		float ax = (alignment_diff_x * cos_rot) + (alignment_diff_y * sin_rot);
+		float ay = (alignment_diff_x * sin_rot) + (alignment_diff_y * cos_rot);
+		alignment_diff_x = ax;
+		alignment_diff_y = ay;
+	}
+	float cx2 = cx_rot / 2.0f;
+	float cy2 = cy_rot / 2.0f;
+	if (zoom != 1.0f) {
+		cx2 *= zoom;
+		cy2 *= zoom;
+	}
 	if (position - POS_EDGE == 0) {
-		if (alignment & OBS_ALIGN_LEFT) {
-			pos->x += cx >> 1;
-		} else if (alignment & OBS_ALIGN_RIGHT) {
-			pos->x -= cx >> 1;
-		}
-		if (alignment & OBS_ALIGN_TOP) {
-			pos->y += cy >> 1;
-		} else if (alignment & OBS_ALIGN_BOTTOM) {
-			pos->y -= cy >> 1;
-		}
+		pos->x += alignment_diff_x;
+		pos->y += alignment_diff_y;
 		// pos is center of object
-		float diff_x = pos->x - (canvas_width >> 1);
-		float diff_y = pos->y - (canvas_height >> 1);
-		float factor_x = fabsf(diff_x) / (canvas_width >> 1);
-		float factor_y = fabsf(diff_y) / (canvas_height >> 1);
+		float diff_x = pos->x - ((float)canvas_width / 2.0f);
+		float diff_y = pos->y - ((float)canvas_height / 2.0f);
+		float factor_x = fabsf(diff_x) / ((float)canvas_width / 2.0f);
+		float factor_y = fabsf(diff_y) / ((float)canvas_height / 2.0f);
 
 		if (diff_x == 0.0f && diff_y == 0.0f) {
 			diff_y = 1.0f;
@@ -554,112 +586,62 @@ void calc_edge_position(struct vec2 *pos, long long position, uint32_t canvas_wi
 				//left edge
 				const float move_x = -(pos->x + cx2);
 				const float move_y = diff_y * (diff_x + move_x) / diff_x;
-				vec2_set(pos, -(float)cx2, (float)(canvas_height >> 1) + move_y);
+				vec2_set(pos, -(float)cx2, ((float)canvas_height / 2.0f) + move_y);
 			} else {
 				//right edge
 				const float move_x = (canvas_width - pos->x) + cx2;
 				const float move_y = diff_y * (diff_x + move_x) / diff_x;
-				vec2_set(pos, (float)canvas_width + cx2, (float)(canvas_height >> 1) + move_y);
+				vec2_set(pos, (float)canvas_width + cx2, ((float)canvas_height / 2.0f) + move_y);
 			}
 		} else {
 			if (diff_y < 0.0f) {
 				//top edge
 				const float move_y = -(pos->y + cy2);
 				const float move_x = diff_x * (diff_y + move_y) / diff_y;
-				vec2_set(pos, (float)(canvas_width >> 1) + move_x, -(float)cy2);
+				vec2_set(pos, ((float)canvas_width / 2.0f) + move_x, -(float)cy2);
 			} else {
 				//bottom edge
 				const float move_y = (canvas_height - pos->y) + cy2;
 				const float move_x = diff_x * (diff_y + move_y) / diff_y;
-				vec2_set(pos, (float)(canvas_width >> 1) + move_x, (float)canvas_height + cy2);
+				vec2_set(pos, ((float)canvas_width / 2.0f) + move_x, (float)canvas_height + cy2);
 			}
 		}
-
-		if (alignment & OBS_ALIGN_LEFT) {
-			if (cx < 0) {
-				pos->x += cx2;
-			} else {
-				pos->x -= cx2;
-			}
-		} else if (alignment & OBS_ALIGN_RIGHT) {
-			if (cx < 0) {
-				pos->x -= cx2;
-			} else {
-				pos->x += cx2;
-			}
-		}
-		if (alignment & OBS_ALIGN_TOP) {
-			if (cy < 0) {
-				pos->y += cy2;
-			} else {
-				pos->y -= cy2;
-			}
-		} else if (alignment & OBS_ALIGN_BOTTOM) {
-			if (cy < 0) {
-				pos->y -= cy2;
-			} else {
-				pos->y += cy2;
-			}
-		}
-
+		pos->x -= alignment_diff_x;
+		pos->y -= alignment_diff_y;
 		return;
 	}
 	if (zoom != 1.0f) {
-		cx = (int32_t)((float)cx * zoom);
-		cy = (int32_t)((float)cy * zoom);
+		alignment_diff_x *= zoom;
+		alignment_diff_y *= zoom;
 	}
+
 	if (position & POS_EDGE)
 		vec2_set(pos, 0, 0);
+
 	if (position & POS_RIGHT) {
 		pos->x = (float)canvas_width;
-		if (alignment & OBS_ALIGN_RIGHT) {
-			pos->x += cx;
-		} else if (alignment & OBS_ALIGN_LEFT) {
-
-		} else {
-			pos->x += cx2;
-		}
+		pos->x += alignment_diff_x;
+		pos->x += cx2;
 	} else if (position & POS_LEFT) {
-		pos->x = 0;
-		if (alignment & OBS_ALIGN_RIGHT) {
-
-		} else if (alignment & OBS_ALIGN_LEFT) {
-			pos->x -= cx;
-		} else {
-			pos->x -= cx2;
-		}
+		pos->x = 0.0f;
+		pos->x += alignment_diff_x;
+		pos->x -= cx2;
 	} else if (position & POS_EDGE) {
-		pos->x = (float)(canvas_width >> 1);
-		if (alignment & OBS_ALIGN_RIGHT) {
-			pos->x += cx2;
-		} else if (alignment & OBS_ALIGN_LEFT) {
-			pos->x -= cx2;
-		}
+		pos->x = (float)canvas_width / 2.0f;
+		pos->x += alignment_diff_x;
 	}
 
 	if (position & POS_BOTTOM) {
 		pos->y = (float)canvas_height;
-		if (alignment & OBS_ALIGN_TOP) {
-		} else if (alignment & OBS_ALIGN_BOTTOM) {
-			pos->y += cy;
-		} else {
-			pos->y += cy2;
-		}
+		pos->y += alignment_diff_y;
+		pos->y += cy2;
 	} else if (position & POS_TOP) {
 		pos->y = 0;
-		if (alignment & OBS_ALIGN_BOTTOM) {
-		} else if (alignment & OBS_ALIGN_TOP) {
-			pos->y -= cy;
-		} else {
-			pos->y -= cy2;
-		}
+		pos->y += alignment_diff_y;
+		pos->y -= cy2;
 	} else if (position & POS_EDGE) {
-		pos->y = (float)(canvas_height >> 1);
-		if (alignment & OBS_ALIGN_TOP) {
-			pos->y -= cy2;
-		} else if (alignment & OBS_ALIGN_BOTTOM) {
-			pos->y += cy2;
-		}
+		pos->y = (float)canvas_height / 2.0f;
+		pos->y += alignment_diff_y;
 	}
 }
 
@@ -832,16 +814,6 @@ obs_source_t *get_transition(const char *transition_name, void *pool_data, size_
 		*index = i + 1;
 	}
 	return transition;
-}
-
-float rot_diff(float rot_a, float rot_b)
-{
-	float diff = rot_b - rot_a;
-	while (diff < -180.0f)
-		diff += 360.0f;
-	while (diff > 180.0f)
-		diff -= 360.0f;
-	return diff;
 }
 
 static void calculate_bounds_item(const obs_sceneitem_t *item, struct vec2 *origin, struct vec2 *scale, uint32_t *cx, uint32_t *cy,
@@ -1145,8 +1117,8 @@ bool render2_item(struct move_info *move, struct move_item *item)
 	float ot = t;
 	if (t > 1.0f)
 		ot = 1.0f;
-	else if (t < 0.0f)
-		ot = 0.0f;
+	else if (t <= 0.0f)
+		ot = 0.0001f;
 
 	if (item->item_a && item->item_b && item->transition &&
 	    (!move->first_frame || item->scene_flip_horizontal || item->scene_flip_vertical)) {
@@ -1377,25 +1349,25 @@ bool render2_item(struct move_info *move, struct move_item *item)
 		} else if (alignment & OBS_ALIGN_LEFT) {
 
 		} else {
-			pos_a.x += canvas_width >> 1;
+			pos_a.x += (float)canvas_width / 2.0f;
 		}
 		if (alignment & OBS_ALIGN_BOTTOM) {
 			pos_a.y += canvas_height;
 		} else if (alignment & OBS_ALIGN_TOP) {
 
 		} else {
-			pos_a.x += canvas_height >> 1;
+			pos_a.x += (float)canvas_height / 2.0f;
 		}
 	} else {
 		uint32_t alignment = obs_sceneitem_get_alignment(scene_item);
 		if (item->position & POS_CENTER) {
-			vec2_set(&pos_a, (float)(canvas_width >> 1), (float)(canvas_height >> 1));
+			vec2_set(&pos_a, (float)canvas_width / 2.0f, (float)canvas_height / 2.0f);
 			if (item->zoom == 1.0f)
 				pos_add_center(&pos_a, alignment, cx, cy);
 		} else if (item->position & POS_EDGE || item->position & POS_SWIPE) {
 			obs_sceneitem_get_pos(item->item_b, &pos_a);
 			calc_edge_position(&pos_a, item->position, canvas_width, canvas_height, alignment, original_cx, original_cy,
-					   item->zoom);
+					   item->zoom, rot);
 
 		} else {
 			obs_sceneitem_get_pos(item->item_b, &pos_a);
@@ -1414,25 +1386,25 @@ bool render2_item(struct move_info *move, struct move_item *item)
 		} else if (alignment & OBS_ALIGN_LEFT) {
 
 		} else {
-			pos_b.x += canvas_width >> 1;
+			pos_b.x += (float)canvas_width / 2.0f;
 		}
 		if (alignment & OBS_ALIGN_BOTTOM) {
 			pos_b.y += canvas_height;
 		} else if (alignment & OBS_ALIGN_TOP) {
 
 		} else {
-			pos_b.x += canvas_height >> 1;
+			pos_b.x += (float)canvas_height / 2.0f;
 		}
 	} else {
 		uint32_t alignment = obs_sceneitem_get_alignment(scene_item);
 		if (item->position & POS_CENTER) {
-			vec2_set(&pos_b, (float)(canvas_width >> 1), (float)(canvas_height >> 1));
+			vec2_set(&pos_b, (float)canvas_width / 2.0f, (float)canvas_height / 2.0f);
 			if (item->zoom == 1.0f)
 				pos_add_center(&pos_b, alignment, cx, cy);
 		} else if (item->position & POS_EDGE || item->position & POS_SWIPE) {
 			obs_sceneitem_get_pos(item->item_a, &pos_b);
 			calc_edge_position(&pos_b, item->position, canvas_width, canvas_height, alignment, original_cx, original_cy,
-					   item->zoom);
+					   item->zoom, rot);
 
 		} else {
 			obs_sceneitem_get_pos(item->item_a, &pos_b);
@@ -1446,12 +1418,12 @@ bool render2_item(struct move_info *move, struct move_item *item)
 		float diff_y = fabsf(pos_a.y - pos_b.y);
 		struct vec2 control_pos;
 		vec2_set(&control_pos, 0.5f * pos_a.x + 0.5f * pos_b.x, 0.5f * pos_a.y + 0.5f * pos_b.y);
-		if (control_pos.x >= (canvas_width >> 1)) {
+		if (control_pos.x >= ((float)canvas_width / 2.0f)) {
 			control_pos.x += diff_y * item->curve;
 		} else {
 			control_pos.x -= diff_y * item->curve;
 		}
-		if (control_pos.y >= (canvas_height >> 1)) {
+		if (control_pos.y >= ((float)canvas_height / 2.0f)) {
 			control_pos.y += diff_x * item->curve;
 		} else {
 			control_pos.y -= diff_x * item->curve;
@@ -1465,12 +1437,17 @@ bool render2_item(struct move_info *move, struct move_item *item)
 
 	struct vec2 output_scale = scale;
 
-	if (item->item_render && !item_texture_enabled(item->item_a) && !item_texture_enabled(item->item_b)) {
+	const enum gs_color_space space = gs_get_color_space();
+	const enum gs_color_format format = gs_get_format_from_space(space);
+
+	if (item->item_render && ((!item_texture_enabled(item->item_a) && !item_texture_enabled(item->item_b)) ||
+				  gs_texrender_get_format(item->item_render) != format)) {
 		gs_texrender_destroy(item->item_render);
 		item->item_render = NULL;
-	} else if (!item->item_render &&
-		   ((item->item_a && item_texture_enabled(item->item_a)) || (item->item_b && item_texture_enabled(item->item_b)))) {
-		item->item_render = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	}
+	if (!item->item_render &&
+	    ((item->item_a && item_texture_enabled(item->item_a)) || (item->item_b && item_texture_enabled(item->item_b)))) {
+		item->item_render = gs_texrender_create(format, GS_ZS_NONE);
 	} else if (item->item_render) {
 		gs_texrender_reset(item->item_render);
 	}
@@ -1511,8 +1488,8 @@ bool render2_item(struct move_info *move, struct move_item *item)
 
 	if (item->item_render) {
 		if (width && height &&
-		    gs_texrender_begin(item->item_render, width - (bounds_crop.left + bounds_crop.right),
-				       height - (bounds_crop.top + bounds_crop.bottom))) {
+		    gs_texrender_begin_with_color_space(item->item_render, width - (bounds_crop.left + bounds_crop.right),
+							height - (bounds_crop.top + bounds_crop.bottom), space)) {
 			float cx_scale = (float)original_width / (float)(width - (bounds_crop.left + bounds_crop.right));
 			float cy_scale = (float)original_height / (float)(height - (bounds_crop.top + bounds_crop.bottom));
 			struct vec4 clear_color;
@@ -2475,6 +2452,7 @@ static void move_start_init(struct move_info *move, bool in_graphics)
 	if (move->scene_source_b)
 		obs_source_enum_filters(move->scene_source_b, move_filter_start_in, NULL);
 
+	pthread_mutex_lock(&move->item_mutex);
 	obs_scene_t *scene_a = obs_scene_from_source(move->scene_source_a);
 	if (!scene_a)
 		scene_a = obs_group_from_source(move->scene_source_a);
@@ -3008,6 +2986,7 @@ static void move_start_init(struct move_info *move, bool in_graphics)
 			item->transition_name = bstrdup(move->transition_move);
 		}
 	}
+	pthread_mutex_unlock(&move->item_mutex);
 }
 
 static void move_video_tick(void *data, float seconds)
@@ -3071,6 +3050,21 @@ static void move_video_render(void *data, gs_effect_t *effect)
 	da_pop_back(move_rendering);
 
 	UNUSED_PARAMETER(effect);
+}
+
+static enum gs_color_space move_video_get_color_space(void *data, size_t count, const enum gs_color_space *preferred_spaces)
+{
+	struct move_info *move = data;
+	const enum gs_color_space transition_space = obs_transition_video_get_color_space(move->source);
+
+	enum gs_color_space space = transition_space;
+	for (size_t i = 0; i < count; ++i) {
+		space = preferred_spaces[i];
+		if (space == transition_space)
+			break;
+	}
+
+	return space;
 }
 
 static float mix_a(void *data, float t)
@@ -3280,21 +3274,29 @@ static void move_stop(void *data)
 static void move_enum_active_sources(void *data, obs_source_enum_proc_t enum_callback, void *param)
 {
 	struct move_info *move = data;
+	if (!obs_in_task_thread(OBS_TASK_GRAPHICS))
+		pthread_mutex_lock(&move->item_mutex);
 	for (size_t i = 0; i < move->items_a.num; i++) {
 		struct move_item *item = move->items_a.array[i];
 		if (item->transition)
 			enum_callback(move->source, item->transition, param);
 	}
+	if (!obs_in_task_thread(OBS_TASK_GRAPHICS))
+		pthread_mutex_unlock(&move->item_mutex);
 }
 
 static void move_enum_all_sources(void *data, obs_source_enum_proc_t enum_callback, void *param)
 {
 	struct move_info *move = data;
+	if (!obs_in_task_thread(OBS_TASK_GRAPHICS))
+		pthread_mutex_lock(&move->item_mutex);
 	for (size_t i = 0; i < move->items_a.num; i++) {
 		struct move_item *item = move->items_a.array[i];
 		if (item->transition)
 			enum_callback(move->source, item->transition, param);
 	}
+	if (!obs_in_task_thread(OBS_TASK_GRAPHICS))
+		pthread_mutex_unlock(&move->item_mutex);
 }
 
 struct obs_source_info move_transition = {
@@ -3313,6 +3315,7 @@ struct obs_source_info move_transition = {
 	.transition_stop = move_stop,
 	.enum_active_sources = move_enum_active_sources,
 	.enum_all_sources = move_enum_all_sources,
+	.video_get_color_space = move_video_get_color_space,
 };
 
 OBS_DECLARE_MODULE()
@@ -3355,6 +3358,7 @@ static float move_get_transition_filter(obs_source_t *filter_from, obs_source_t 
 	if (!source_from)
 		return 0.0f;
 
+	pthread_mutex_lock(&move->item_mutex);
 	for (size_t i = 0; i < move->items_a.num; i++) {
 		struct move_item *item = move->items_a.array[i];
 		if (!item->item_a || !item->item_b)
@@ -3369,6 +3373,7 @@ static float move_get_transition_filter(obs_source_t *filter_from, obs_source_t 
 		} else {
 			continue;
 		}
+		pthread_mutex_unlock(&move->item_mutex);
 		if (filter_to && source_to) {
 			if (source_to == source_from) {
 				*filter_to = filter_from;
@@ -3430,6 +3435,7 @@ static float move_get_transition_filter(obs_source_t *filter_from, obs_source_t 
 			t = 1.0f - t;
 		return t;
 	}
+	pthread_mutex_unlock(&move->item_mutex);
 	return 0.0f;
 }
 
@@ -3446,7 +3452,8 @@ static void move_get_transition_filter_function(void *data, calldata_t *calldata
 
 bool move_exit = false;
 
-void move_frontend_event(enum obs_frontend_event event, void* data) {
+void move_frontend_event(enum obs_frontend_event event, void *data)
+{
 	UNUSED_PARAMETER(data);
 	if (event == OBS_FRONTEND_EVENT_EXIT) {
 		move_exit = true;

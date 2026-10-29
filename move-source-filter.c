@@ -951,8 +951,8 @@ static obs_properties_t *move_source_properties(void *data)
 
 	p = obs_properties_add_text(group, S_TRANSFORM_TEXT, obs_module_text("Transform"), OBS_TEXT_DEFAULT);
 	obs_property_set_modified_callback2(p, move_source_transform_text_changed, data);
-	obs_properties_add_button(group, "transform_get", obs_module_text("GetTransform"), move_source_get_transform);
-	obs_properties_add_button(group, "switch_to_relative", obs_module_text("TransformRelative"), move_source_relative);
+	obs_properties_add_button2(group, "transform_get", obs_module_text("GetTransform"), move_source_get_transform, data);
+	obs_properties_add_button2(group, "switch_to_relative", obs_module_text("TransformRelative"), move_source_relative, data);
 
 	obs_properties_add_float_slider(group, S_CURVE_MATCH, obs_module_text("Curve"), -2.0, 2.0, 0.01);
 
@@ -1110,7 +1110,7 @@ static obs_properties_t *move_source_properties(void *data)
 	obs_property_list_add_int(p, obs_module_text("NextMoveOn.End"), NEXT_MOVE_ON_END);
 	obs_property_list_add_int(p, obs_module_text("NextMoveOn.Hotkey"), NEXT_MOVE_ON_HOTKEY);
 
-	obs_properties_add_button(group, "move_source_start", obs_module_text("Start"), move_source_start_button);
+	obs_properties_add_button2(group, "move_source_start", obs_module_text("Start"), move_source_start_button, data);
 
 	p = obs_properties_add_group(ppts, S_ACTIONS, obs_module_text("Actions"), OBS_GROUP_NORMAL, group);
 	obs_properties_add_text(ppts, "plugin_info", PLUGIN_INFO, OBS_TEXT_INFO);
@@ -1245,12 +1245,12 @@ void move_source_tick(void *data, float seconds)
 			struct vec2 control_pos;
 			vec2_set(&control_pos, 0.5f * move_source->pos_from.x + 0.5f * move_source->pos_to.x,
 				 0.5f * move_source->pos_from.y + 0.5f * move_source->pos_to.y);
-			if (control_pos.x >= (move_source->canvas_width >> 1)) {
+			if (control_pos.x >= ((float)move_source->canvas_width / 2.0f)) {
 				control_pos.x += diff_y * move_source->curve;
 			} else {
 				control_pos.x -= diff_y * move_source->curve;
 			}
-			if (control_pos.y >= (move_source->canvas_height >> 1)) {
+			if (control_pos.y >= ((float)move_source->canvas_height / 2.0f)) {
 				control_pos.y += diff_x * move_source->curve;
 			} else {
 				control_pos.y -= diff_x * move_source->curve;

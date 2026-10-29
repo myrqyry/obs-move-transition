@@ -886,7 +886,7 @@ static obs_properties_t *move_directshow_properties(void *data)
 
 	obs_properties_add_group(ppts, "procamp_group", obs_module_text("VideoProcAmp"), OBS_GROUP_NORMAL, obs_properties_create());
 
-	obs_properties_add_button(ppts, "value_get", obs_module_text("GetValue"), move_directshow_get_value);
+	obs_properties_add_button2(ppts, "value_get", obs_module_text("GetValue"), move_directshow_get_value, data);
 
 	move_filter_properties(&move_directshow->move_filter, ppts);
 

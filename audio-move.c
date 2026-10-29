@@ -787,6 +787,7 @@ void audio_move_tick(void *data, float seconds)
 		obs_source_t *source = obs_weak_source_get_source(filter->target_source);
 		if (!source)
 			return;
+		bool changed = false;
 		obs_data_t *settings = obs_source_get_settings(source);
 		double val = filter->factor * filter->audio_value + filter->base_value;
 		if (filter->audio_value < filter->threshold)
@@ -795,15 +796,25 @@ void audio_move_tick(void *data, float seconds)
 		if (setting) {
 			const enum obs_data_number_type num_type = obs_data_item_numtype(setting);
 			if (num_type == OBS_DATA_NUM_INT) {
-				obs_data_item_set_int(&setting, (long long)val);
+				if (obs_data_item_get_int(setting) != (long long)val) {
+
+					changed = true;
+					obs_data_item_set_int(&setting, (long long)val);
+				}
 			} else if (num_type == OBS_DATA_NUM_DOUBLE) {
-				obs_data_item_set_double(&setting, val);
+				if (obs_data_item_get_double(setting) != val) {
+					changed = true;
+					obs_data_item_set_double(&setting, val);
+				}
 			}
 			obs_data_item_release(&setting);
-		} else {
+		} else if (obs_data_get_double(settings, filter->setting_name) != val) {
+			changed = true;
 			obs_data_set_double(settings, filter->setting_name, val);
 		}
-		obs_source_update(source, settings);
+		if (changed) {
+			obs_source_update(source, settings);
+		}
 		obs_data_release(settings);
 		obs_source_release(source);
 	}
