@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="media/logo.svg" width="160" alt="Move Transition logo">
+</p>
+
 # Move Transition for OBS Studio
 
 Move Transition is an OBS Studio plugin by
