@@ -3343,6 +3343,13 @@ extern struct obs_source_info move_wave_value_filter;
 extern struct obs_source_info mediapipe_move_filter;
 extern void mp_move_register(void);
 
+#ifdef WIN32
+// Implemented in the Windows-only NVIDIA C and DirectShow C++ units.
+extern bool load_nvar(void);
+extern struct obs_source_info nvidia_move_filter;
+extern void SetMoveDirectShowFilter(struct obs_source_info *info);
+#endif
+
 extern DARRAY(struct udp_server) udp_servers;
 extern pthread_mutex_t udp_servers_mutex;
 

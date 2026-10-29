@@ -57,7 +57,7 @@
 	#define FEATURE_BOUNDINGBOX_WIDTH           3
 	#define FEATURE_BOUNDINGBOX_TOP        4
 	#define FEATURE_BOUNDINGBOX_VERTICAL_CENTER  5
-	#define FEATURE_BOUNDINGBOX_BOW  6
+	#define FEATURE_BOUNDINGBOX_BOTTOM  6
 	#define FEATURE_BOUNDINGBOX_HEIGHT            7
 	#define FEATURE_BOUNDINGBOX_TOP_LEFT          8
 	#define FEATURE_BOUNDINGBOX_TOP_CENTER       9
@@ -353,7 +353,7 @@ static bool nv_move_action_get_float(struct nvidia_move_info *filter, struct nvi
 		} else if (action->feature_property == FEATURE_BOUNDINGBOX_VERTICAL_CENTER) {
 			value = filter->bboxes.boxes[0].y + filter->bboxes.boxes[0].height / 2.0f;
 			success = true;
-		} else if (action->feature_property == FEATURE_BOUNDINGBOX_BOTOM) {
+		} else if (action->feature_property == FEATURE_BOUNDINGBOX_BOTTOM) {
 			value = filter->bboxes.boxes[0].y + filter->bboxes.boxes[0].height;
 			success = true;
 		} else if (action->feature_property == FEATURE_BOUNDINGBOX_HEIGHT) {
@@ -2161,7 +2161,7 @@ static obs_properties_t *nv_move_properties(void *data)
 		obs_property_list_add_int(p, obs_module_text("Width"), FEATURE_BOUNDINGBOX_WIDTH);
 		obs_property_list_add_int(p, obs_module_text("Top"), FEATURE_BOUNDINGBOX_TOP);
 		obs_property_list_add_int(p, obs_module_text("VerticalCenter"), FEATURE_BOUNDINGBOX_VERTICAL_CENTER);
-		obs_property_list_add_int(p, obs_module_text("Bottom"), FEATURE_BOUNDINGBOX_BOTOM);
+		obs_property_list_add_int(p, obs_module_text("Bottom"), FEATURE_BOUNDINGBOX_BOTTOM);
 		obs_property_list_add_int(p, obs_module_text("Height"), FEATURE_BOUNDINGBOX_HEIGHT);
 		obs_property_list_add_int(p, obs_module_text("TopLeft"), FEATURE_BOUNDINGBOX_TOP_LEFT);
 		obs_property_list_add_int(p, obs_module_text("TopCenter"), FEATURE_BOUNDINGBOX_TOP_CENTER);

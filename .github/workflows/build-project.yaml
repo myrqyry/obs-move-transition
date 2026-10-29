@@ -278,6 +278,9 @@ jobs:
           "pluginName=${ProductName}" >> $env:GITHUB_OUTPUT
           "pluginVersion=${ProductVersion}" >> $env:GITHUB_OUTPUT
 
+      - name: Check Windows source contracts 🔎
+        run: python scripts/test_windows_build_contract.py
+
       - name: Build Plugin 🧱
         uses: ./.github/actions/build-plugin
         with:
